@@ -8,7 +8,8 @@ import ora from 'ora';
 import BN from 'bn.js';
 
 interface BuyOptions {
-  slab: string;
+  slab?: string;       // Manual slab selection
+  instrument?: string; // Smart routing by instrument (NEW)
   quantity: string;
   price?: string;  // Optional: if not provided, market order
   leverage?: string;  // Optional: "5x", "10x", etc. Default: 1x (spot)
@@ -37,10 +38,20 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
   const spinner = ora('Loading configuration...').start();
 
   try {
-    // Validate required options
-    if (!options.slab) {
+    // Validate mutually exclusive flags
+    if (options.slab && options.instrument) {
       spinner.fail();
-      displayError('Missing required option: --slab <address>');
+      displayError('Cannot specify both --slab and --instrument. Choose one.');
+      console.log(chalk.gray('\nUse --slab for manual selection or --instrument for smart routing\n'));
+      process.exit(1);
+    }
+
+    if (!options.slab && !options.instrument) {
+      spinner.fail();
+      displayError('Must specify either --slab or --instrument');
+      console.log(chalk.gray('\nExamples:'));
+      console.log(chalk.cyan('  barista buy --slab SLaBZ6Ps... -q 100'));
+      console.log(chalk.cyan('  barista buy --instrument <INSTRUMENT_PUBKEY> -q 100\n'));
       process.exit(1);
     }
 
@@ -78,18 +89,48 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       wallet
     );
 
-    // Parse inputs
-    const slabMarket = new PublicKey(options.slab);
     const quantityInput = new BN(options.quantity);
-
-    // Get price (either from user or fetch market price)
+    let slabMarket: PublicKey;
     let price: BN;
-    if (isMarketOrder) {
-      spinner.text = 'Fetching market price...';
-      price = await client.getMarketPrice(slabMarket, config.slabProgramId);
-      console.log(chalk.gray(`  Market price: ${price.toString()}`));
+
+    if (options.instrument) {
+      // ============ SMART ROUTING MODE ============
+      spinner.text = 'Finding best slab for instrument...';
+      const instrumentId = new PublicKey(options.instrument);
+
+      const bestSlab = await client.findBestSlabForTrade(
+        instrumentId,
+        'buy',
+        quantityInput,
+        config.slabProgramId
+      );
+
+      slabMarket = bestSlab.slab;
+      price = bestSlab.price;
+
+      spinner.succeed();
+      console.log();
+      console.log(chalk.green('✓ Smart routing found best price'));
+      console.log(chalk.gray(`  Instrument: ${options.instrument}`));
+      console.log(chalk.gray(`  Best slab: ${slabMarket.toBase58()}`));
+      console.log(chalk.gray(`  Best ask: ${price.toString()}`));
+      console.log(chalk.gray(`  Available: ${bestSlab.availableQty.toString()} units`));
+      console.log();
+
+      spinner.start('Validating position...');
+
     } else {
-      price = new BN(options.price!);
+      // ============ MANUAL SLAB MODE (existing) ============
+      slabMarket = new PublicKey(options.slab!);
+
+      // Get price (either from user or fetch market price)
+      if (isMarketOrder) {
+        spinner.text = 'Fetching market price...';
+        price = await client.getMarketPrice(slabMarket, config.slabProgramId);
+        console.log(chalk.gray(`  Market price: ${price.toString()}`));
+      } else {
+        price = new BN(options.price!);
+      }
     }
 
     // Validate position with NEW leverage model

@@ -28,6 +28,11 @@ import {
   SlabInfo,
 } from '../types/discovery';
 import {
+  QuoteLevel,
+  QuoteCache,
+  SlabQuotes,
+} from '../types/slab';
+import {
   serializeU64,
   serializeU128,
   serializeI64,
@@ -431,6 +436,206 @@ export class RouterClient {
 
     const markPx = new BN(accountInfo.data.readBigInt64LE(offset).toString());
     return markPx;
+  }
+
+  // ============================================================================
+  // Smart Routing Methods
+  // ============================================================================
+
+  /**
+   * Parse QuoteCache from slab account data
+   * QuoteCache is located at offset 256 (after SlabHeader)
+   *
+   * @param data Slab account data buffer
+   * @param offset Offset to QuoteCache (default 256)
+   * @returns Parsed QuoteCache with best bid/ask levels
+   */
+  private parseQuoteCache(data: Buffer, offset: number = 256): QuoteCache {
+    let pos = offset;
+
+    // Read seqno_snapshot (u32)
+    const seqnoSnapshot = data.readUInt32LE(pos);
+    pos += 4;
+    pos += 4; // Skip padding
+
+    // Read best_bids[4] - each level is 16 bytes (px: i64, avail_qty: i64)
+    const bestBids: QuoteLevel[] = [];
+    for (let i = 0; i < 4; i++) {
+      const px = new BN(data.readBigInt64LE(pos).toString());
+      pos += 8;
+      const availQty = new BN(data.readBigInt64LE(pos).toString());
+      pos += 8;
+
+      // Only include levels with non-zero price or quantity
+      if (!px.isZero() || !availQty.isZero()) {
+        bestBids.push({ price: px, availableQty: availQty });
+      }
+    }
+
+    // Read best_asks[4] - each level is 16 bytes (px: i64, avail_qty: i64)
+    const bestAsks: QuoteLevel[] = [];
+    for (let i = 0; i < 4; i++) {
+      const px = new BN(data.readBigInt64LE(pos).toString());
+      pos += 8;
+      const availQty = new BN(data.readBigInt64LE(pos).toString());
+      pos += 8;
+
+      // Only include levels with non-zero price or quantity
+      if (!px.isZero() || !availQty.isZero()) {
+        bestAsks.push({ price: px, availableQty: availQty });
+      }
+    }
+
+    return {
+      seqnoSnapshot,
+      bestBids,
+      bestAsks,
+    };
+  }
+
+  /**
+   * Get detailed quotes from a slab (includes QuoteCache with best bid/ask levels)
+   * Used for smart routing and price discovery
+   *
+   * @param slabMarket Slab market address
+   * @returns Slab quotes with instrument, mark price, and quote cache
+   */
+  async getSlabQuotes(slabMarket: PublicKey): Promise<SlabQuotes> {
+    const accountInfo = await this.connection.getAccountInfo(slabMarket);
+
+    if (!accountInfo) {
+      throw new Error(`Slab market not found: ${slabMarket.toBase58()}`);
+    }
+
+    // Parse SlabHeader fields
+    // instrument: Pubkey at offset 80 (after magic, version, seqno, program_id, lp_owner, router_id)
+    const instrument = new PublicKey(accountInfo.data.slice(80, 112));
+
+    // mark_px: i64 at offset 176 (after instrument, contract_size, tick, lot)
+    const markPrice = new BN(accountInfo.data.readBigInt64LE(176).toString());
+
+    // Parse QuoteCache at offset 256 (after SlabHeader which is 256 bytes)
+    const cache = this.parseQuoteCache(accountInfo.data, 256);
+
+    return {
+      slab: slabMarket,
+      instrument,
+      markPrice,
+      cache,
+    };
+  }
+
+  /**
+   * Find the best slab for a trade using smart routing
+   * Compares prices across all slabs trading the same instrument
+   *
+   * @param instrumentId Instrument public key to trade
+   * @param side 'buy' or 'sell'
+   * @param quantity Desired quantity (for liquidity checking)
+   * @param slabProgramId Slab program ID
+   * @returns Best slab with price and available liquidity
+   */
+  async findBestSlabForTrade(
+    instrumentId: PublicKey,
+    side: 'buy' | 'sell',
+    quantity: BN,
+    slabProgramId: PublicKey
+  ): Promise<{
+    slab: PublicKey;
+    price: BN;
+    availableQty: BN;
+    totalLiquidity: BN;
+  }> {
+    // 1. Get all slabs trading this instrument
+    const slabAddresses = await this.getSlabsForInstrument(
+      instrumentId,
+      slabProgramId
+    );
+
+    if (slabAddresses.length === 0) {
+      throw new Error(
+        `No slabs found for instrument ${instrumentId.toBase58()}`
+      );
+    }
+
+    // 2. Fetch quotes from all slabs in parallel
+    const slabQuotesPromises = slabAddresses.map(async (slab) => {
+      try {
+        return await this.getSlabQuotes(slab);
+      } catch (err) {
+        // Skip slabs that fail to fetch
+        return null;
+      }
+    });
+
+    const slabQuotes = await Promise.all(slabQuotesPromises);
+
+    // Filter out nulls (failed fetches)
+    const validQuotes = slabQuotes.filter((q): q is SlabQuotes => q !== null);
+
+    if (validQuotes.length === 0) {
+      throw new Error('Failed to fetch quotes from any slab');
+    }
+
+    // 3. Find best price across all slabs
+    let bestSlab: PublicKey | null = null;
+    let bestPrice: BN | null = null;
+    let bestAvailQty: BN | null = null;
+    let totalLiquidityAtLevel: BN = new BN(0);
+
+    for (const quotes of validQuotes) {
+      // Select appropriate side (buy looks at asks, sell looks at bids)
+      const levels = side === 'buy' ? quotes.cache.bestAsks : quotes.cache.bestBids;
+
+      if (levels.length === 0) continue; // No liquidity
+
+      const topLevel = levels[0]; // Best price is always first
+
+      if (topLevel.availableQty.isZero()) continue; // No quantity available
+
+      // For buy: lower price is better (cheaper)
+      // For sell: higher price is better (more revenue)
+      const isBetter =
+        !bestPrice ||
+        (side === 'buy'
+          ? topLevel.price.lt(bestPrice)
+          : topLevel.price.gt(bestPrice));
+
+      if (isBetter) {
+        bestSlab = quotes.slab;
+        bestPrice = topLevel.price;
+        bestAvailQty = topLevel.availableQty;
+
+        // Calculate total liquidity at this price level across all slabs
+        totalLiquidityAtLevel = validQuotes
+          .filter(q => {
+            const lvl = side === 'buy' ? q.cache.bestAsks[0] : q.cache.bestBids[0];
+            return lvl && lvl.price.eq(topLevel.price);
+          })
+          .reduce((sum, q) => {
+            const lvl = side === 'buy' ? q.cache.bestAsks[0] : q.cache.bestBids[0];
+            return sum.add(lvl.availableQty);
+          }, new BN(0));
+      }
+    }
+
+    if (!bestSlab || !bestPrice || !bestAvailQty) {
+      throw new Error('No liquidity available across any slabs');
+    }
+
+    // 4. Check if sufficient liquidity exists
+    if (bestAvailQty.lt(quantity)) {
+      throw new Error(
+        `Insufficient liquidity: requested ${quantity.toString()}, available ${bestAvailQty.toString()} at best price`
+      );
+    }
+
+    return {
+      slab: bestSlab,
+      price: bestPrice,
+      availableQty: bestAvailQty,
+      totalLiquidity: totalLiquidityAtLevel,
+    };
   }
 
   // ============================================================================

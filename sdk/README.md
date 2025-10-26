@@ -199,7 +199,76 @@ async function checkPortfolioHealth() {
 
 ### 3. Trading
 
-#### Execute Cross-Slab Trade
+#### Smart Routing (Automatic Best Execution)
+
+```typescript
+// Find best slab for trading an instrument
+async function tradeWithSmartRouting(
+  instrumentId: PublicKey,
+  side: 'buy' | 'sell',
+  quantity: BN
+) {
+  // Smart routing finds best price across all slabs
+  const bestSlab = await router.findBestSlabForTrade(
+    instrumentId,
+    side,
+    quantity,
+    slabProgramId
+  );
+
+  console.log(`Best ${side} price: ${bestSlab.price}`);
+  console.log(`On slab: ${bestSlab.slab.toBase58()}`);
+  console.log(`Available liquidity: ${bestSlab.availableQty}`);
+
+  // Execute on the best slab
+  const split: SlabSplit = {
+    slabMarket: bestSlab.slab,
+    isBuy: side === 'buy',
+    size: quantity,
+    price: bestSlab.price,
+  };
+
+  const ix = router.buildExecuteCrossSlabInstruction(
+    wallet.publicKey,
+    [split],
+    slabProgramId
+  );
+
+  const tx = new Transaction().add(ix);
+  const signature = await connection.sendTransaction(tx, [wallet]);
+  await connection.confirmTransaction(signature);
+
+  return signature;
+}
+
+// Example: Buy BTC-PERP with smart routing
+const btcInstrument = new PublicKey('BTC...');
+await tradeWithSmartRouting(btcInstrument, 'buy', new BN(1_000_000));
+```
+
+#### Get Quote Data from Slabs
+
+```typescript
+// Get detailed quotes from a slab (includes best bid/ask levels)
+async function getSlabQuotes(slabMarket: PublicKey) {
+  const quotes = await router.getSlabQuotes(slabMarket);
+
+  console.log('Instrument:', quotes.instrument.toBase58());
+  console.log('Mark Price:', quotes.markPrice.toString());
+  console.log('\nBest Bids:');
+  quotes.cache.bestBids.forEach((level, i) => {
+    console.log(`  ${i + 1}. Price: ${level.price}, Qty: ${level.availableQty}`);
+  });
+  console.log('\nBest Asks:');
+  quotes.cache.bestAsks.forEach((level, i) => {
+    console.log(`  ${i + 1}. Price: ${level.price}, Qty: ${level.availableQty}`);
+  });
+
+  return quotes;
+}
+```
+
+#### Manual Cross-Slab Trade
 
 ```typescript
 import { SlabSplit } from '@barista-dex/sdk';

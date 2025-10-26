@@ -89,3 +89,41 @@ export interface Trade {
   timestamp: BN;
   isBuyerMaker: boolean;
 }
+
+/**
+ * Quote level - single price level in QuoteCache
+ */
+export interface QuoteLevel {
+  /** Price (1e6 scale) */
+  price: BN;
+  /** Available quantity at this level (1e6 scale) */
+  availableQty: BN;
+}
+
+/**
+ * Quote cache - router-readable best bid/ask levels from slab
+ * Each slab maintains top 4 bid and ask levels for fast price discovery
+ */
+export interface QuoteCache {
+  /** Snapshot of slab seqno when cache was last updated */
+  seqnoSnapshot: number;
+  /** Best 4 bid levels (sorted descending by price) */
+  bestBids: QuoteLevel[];
+  /** Best 4 ask levels (sorted ascending by price) */
+  bestAsks: QuoteLevel[];
+}
+
+/**
+ * Slab quotes with full market data
+ * Returned by getSlabQuotes() for smart routing
+ */
+export interface SlabQuotes {
+  /** Slab market address */
+  slab: PublicKey;
+  /** Instrument being traded on this slab */
+  instrument: PublicKey;
+  /** Mark price from oracle (1e6 scale) */
+  markPrice: BN;
+  /** Quote cache with best bid/ask levels */
+  cache: QuoteCache;
+}

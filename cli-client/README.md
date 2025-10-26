@@ -105,6 +105,48 @@ barista withdraw --amount <lamports>
 barista withdraw --amount 500000000
 ```
 
+### Trading
+
+Barista CLI supports two trading modes:
+
+#### Smart Routing (Automatic Best Execution)
+
+Use `--instrument` to automatically find the best price across all slabs:
+
+```bash
+# Buy with smart routing (finds cheapest ask)
+barista buy --instrument <INSTRUMENT_PUBKEY> -q 1000000
+
+# Sell with smart routing (finds highest bid)
+barista sell --instrument <INSTRUMENT_PUBKEY> -q 500000
+
+# With leverage
+barista buy --instrument <INSTRUMENT_PUBKEY> -q 1000000 -l 5x
+```
+
+**Benefits:**
+- Automatic best price discovery
+- No need to track multiple slab addresses
+- Guaranteed best execution across venues
+- Capital efficient cross-margin netting
+
+#### Manual Slab Selection
+
+Use `--slab` to trade on a specific slab:
+
+```bash
+# Buy on specific slab
+barista buy --slab <SLAB_ADDRESS> -q 1000000
+
+# Sell with limit price
+barista sell --slab <SLAB_ADDRESS> -q 500000 -p 50000000
+
+# With leverage
+barista buy --slab <SLAB_ADDRESS> -q 1000000 -l 5x
+```
+
+**Note:** You must specify either `--slab` OR `--instrument`, not both.
+
 ### Market Data
 
 #### Get Price
