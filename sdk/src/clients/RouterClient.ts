@@ -194,6 +194,29 @@ export class RouterClient {
   }
 
   /**
+   * Fetch DLP owner (lp_owner) from slab header
+   * Required for v0.5 PnL settlement - DLP Portfolio acts as counterparty
+   * @param slabMarket Slab market public key
+   * @returns DLP owner public key (lp_owner field from slab header)
+   */
+  async getDlpOwnerForSlab(slabMarket: PublicKey): Promise<PublicKey | null> {
+    const accountInfo = await this.connection.getAccountInfo(slabMarket);
+
+    if (!accountInfo) {
+      return null; // Slab account not found
+    }
+
+    // Slab header layout: discriminator(8) + lp_owner(32) + ...
+    // lp_owner is at offset 8
+    if (accountInfo.data.length < 40) {
+      throw new Error('Invalid slab account data');
+    }
+
+    const lpOwnerBytes = accountInfo.data.slice(8, 40);
+    return new PublicKey(lpOwnerBytes);
+  }
+
+  /**
    * Fetch Vault account data
    * @param mint Token mint public key
    * @returns Vault data
@@ -874,10 +897,10 @@ export class RouterClient {
   }
 
   /**
-   * Build ExecuteCrossSlab instruction
-   * Routes a trade across multiple slab markets with oracle price validation
+   * Build ExecuteCrossSlab instruction (v0.5 with PnL settlement)
+   * Routes a trade across slab markets with real SOL settlement against DLP
    * @param user User's public key
-   * @param splits Array of slab splits (each includes oracle)
+   * @param splits Array of slab splits (each includes oracle and dlpOwner)
    * @param orderType Market (0) or Limit (1) order
    * @returns TransactionInstruction
    */
@@ -886,10 +909,21 @@ export class RouterClient {
     splits: SlabSplit[],
     orderType: ExecutionType = ExecutionType.Limit
   ): TransactionInstruction {
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const [vaultPDA] = this.deriveVaultPDA(SystemProgram.programId); // SOL vault
+    // v0.5: Single slab only (cross-slab routing disabled)
+    if (splits.length !== 1) {
+      throw new Error('v0.5 only supports single slab execution (cross-slab routing disabled)');
+    }
+
+    const [userPortfolioPDA] = this.derivePortfolioPDA(user);
     const [registryPDA] = this.deriveRegistryPDA();
     const [authorityPDA] = this.deriveAuthorityPDA();
+
+    // Derive DLP Portfolio from lp_owner field in slab
+    // Note: splits[0].dlpOwner must be provided by caller (fetched from slab header)
+    if (!splits[0].dlpOwner) {
+      throw new Error('DLP owner (lp_owner) must be provided in slab split');
+    }
+    const [dlpPortfolioPDA] = this.derivePortfolioPDA(splits[0].dlpOwner);
 
     // Serialize instruction data:
     // - num_splits (u8)
@@ -912,21 +946,23 @@ export class RouterClient {
       ...splitBuffers
     );
 
-    // Build account list:
-    // 0. portfolio (writable)
+    // Build account list (v0.5 layout):
+    // 0. user_portfolio (writable)
     // 1. user (signer)
-    // 2. vault (writable)
+    // 2. dlp_portfolio (writable) - counterparty
     // 3. registry (writable)
     // 4. router_authority (PDA)
-    // 5..5+n. slab_accounts (writable)
-    // 5+n..5+2n. receipt_accounts (writable)
-    // 5+2n..5+3n. oracle_accounts (readonly)
+    // 5. system_program (for SOL transfers)
+    // 6..6+n. slab_accounts (writable)
+    // 6+n..6+2n. receipt_accounts (writable)
+    // 6+2n..6+3n. oracle_accounts (readonly)
     const keys = [
-      { pubkey: portfolioPDA, isSigner: false, isWritable: true },
+      { pubkey: userPortfolioPDA, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: false },
-      { pubkey: vaultPDA, isSigner: false, isWritable: true },
+      { pubkey: dlpPortfolioPDA, isSigner: false, isWritable: true },
       { pubkey: registryPDA, isSigner: false, isWritable: true },
       { pubkey: authorityPDA, isSigner: false, isWritable: false },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ];
 
     // Add slab accounts
@@ -1529,12 +1565,20 @@ export class RouterClient {
       throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
     }
 
+    // v0.5: Fetch DLP owner from slab for PnL settlement
+    const dlpOwner = await this.getDlpOwnerForSlab(slabMarket);
+
+    if (!dlpOwner) {
+      throw new Error(`Failed to fetch DLP owner for slab ${slabMarket.toBase58()}`);
+    }
+
     const split: SlabSplit = {
       slabMarket,
       side: 0, // Buy
       qty: quantity,
       limitPx: limitPrice,
       oracle: oracleAccount,
+      dlpOwner, // Required for v0.5 PnL settlement
     };
 
     return this.buildExecuteCrossSlabInstruction(user, [split], orderType);
@@ -1566,12 +1610,20 @@ export class RouterClient {
       throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
     }
 
+    // v0.5: Fetch DLP owner from slab for PnL settlement
+    const dlpOwner = await this.getDlpOwnerForSlab(slabMarket);
+
+    if (!dlpOwner) {
+      throw new Error(`Failed to fetch DLP owner for slab ${slabMarket.toBase58()}`);
+    }
+
     const split: SlabSplit = {
       slabMarket,
       side: 1, // Sell
       qty: quantity,
       limitPx: limitPrice,
       oracle: oracleAccount,
+      dlpOwner, // Required for v0.5 PnL settlement
     };
 
     return this.buildExecuteCrossSlabInstruction(user, [split], orderType);

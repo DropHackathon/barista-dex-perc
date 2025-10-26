@@ -167,7 +167,7 @@ export enum ExecutionType {
 }
 
 /**
- * Slab split for cross-slab routing
+ * Slab split for cross-slab routing (v0.5: single slab only)
  */
 export interface SlabSplit {
   slabMarket: PublicKey;
@@ -175,6 +175,7 @@ export interface SlabSplit {
   qty: BN;           // i64 - quantity in 1e6 scale
   limitPx: BN;       // i64 - limit price in 1e6 scale
   oracle: PublicKey; // Oracle price feed for this slab
+  dlpOwner?: PublicKey; // LP/DLP owner (from slab.lp_owner) - required for v0.5 PnL settlement
 }
 
 /**
