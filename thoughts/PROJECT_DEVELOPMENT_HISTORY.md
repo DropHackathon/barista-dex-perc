@@ -2801,3 +2801,140 @@ Based on TODO markers and documentation:
 **Commits Analyzed**: 54+ (all by Sean)
 **Time Period**: Initial commit → Current HEAD
 **Latest Update**: Upstream integration, portfolio UX improvements
+
+---
+
+## Phase 7: DLP CLI Implementation
+
+### Goal: Provide TypeScript CLI for DLP Operations
+
+**Problem**: DLPs were using either the trader CLI (`cli-client`) or the Rust Keeper CLI (`cli`), neither of which were optimized for DLP workflows.
+
+**Solution**: Create dedicated `@barista-dex/cli-dlp` package with DLP-specific features.
+
+### Key Design Choices
+
+1. **CLI Separation**: DLPs and traders have different needs
+   - `cli-client` = Traders only (buy, sell, portfolio view)
+   - `cli-dlp` = DLPs only (portfolio management, slab operations, analytics)
+2. **TypeScript over Rust**: Better DX with interactive prompts, colors, tables
+3. **npm Package**: Published as `@barista-dex/cli-dlp` for easy installation
+
+### Commands Implemented
+
+**Phase 1 - Portfolio Management** (v0.1.0):
+- `barista-dlp portfolio:init` - Initialize DLP portfolio
+- `barista-dlp portfolio` - View capital summary with detailed breakdown
+- `barista-dlp deposit` - Deposit SOL with auto-initialization and safety checks
+- `barista-dlp withdraw` - Withdraw with comprehensive validations
+
+**Phase 2 - Slab Management** (v0.1.1):
+- `barista-dlp slab:create` - Create slab with interactive parameter prompts
+- `barista-dlp slab:view` - View slab details with optional detailed mode
+
+### Capital Recommendations
+
+**Localnet DLP Capital Guidelines**:
+- **Minimum**: 100 SOL - Basic testing with single trader
+- **Comfortable**: 500 SOL - Multiple concurrent trades, realistic scenarios
+- **Recommended**: 1000 SOL - Stress testing, high-volume trading
+- **Maximum**: 10,000+ SOL - Extreme stress testing
+
+**Rationale**: Unlimited SOL on localnet allows realistic production simulations without cost constraints.
+
+### Technical Implementation
+
+**Files Created**: 28 files
+- 7 command implementations
+- 4 utility modules (wallet, network, display, safety)
+- 7 test files (unit, integration, E2E)
+- 4 documentation files (README, TESTING, CHANGELOG, LICENSE)
+- 1 main CLI entry point
+- 5 configuration files
+
+**Safety Features**:
+- Balance validation before deposits/withdrawals
+- Open position detection (blocks withdrawals)
+- PnL warnings for unrealized losses
+- Capital utilization monitoring
+- Minimum balance enforcement
+- Interactive confirmations for risky operations
+- Force override flag for advanced users
+
+**User Experience Features**:
+- Chalk colors (green=success, red=error, yellow=warning)
+- Ora spinners for async operations
+- cli-table3 for formatted output
+- Inquirer prompts for guided workflows
+- Environment variable support
+- Global options (--keypair, --network, --url)
+
+### npm Publishing Setup
+
+**Package Details**:
+- Name: `@barista-dex/cli-dlp`
+- Version: 0.1.1
+- Binary: `barista-dlp`
+- License: Apache-2.0
+- Engines: Node >=18, npm >=9
+
+**Installation**:
+```bash
+# Global installation
+npm install -g @barista-dex/cli-dlp
+
+# Or use npx (no installation required)
+npx @barista-dex/cli-dlp --help
+```
+
+### Documentation Updates
+
+**Files Updated**:
+1. **DLP_LOCALNET_SETUP_GUIDE.md**: Updated capital recommendations (100-1000 SOL), added cli-dlp as recommended method
+2. **cli-client/README.md**: Added "for traders only" note
+3. **Main README.md**: Added "For End Users" section separating traders vs DLPs
+4. **SDK README.md**: Directed users to appropriate CLIs
+
+### User Experience Comparison
+
+**Before (Rust Keeper CLI)**:
+```bash
+cd cli
+cargo run -- portfolio init --keypair ~/.config/solana/dlp.json --network localnet
+cargo run -- deposit --amount 100000000000 --keypair ~/.config/solana/dlp.json
+```
+
+**After (TypeScript DLP CLI)**:
+```bash
+npm install -g @barista-dex/cli-dlp
+export BARISTA_DLP_KEYPAIR=~/.config/solana/dlp.json
+
+barista-dlp deposit --amount 100000000000  # Colors, spinners, safety checks
+barista-dlp slab:create                     # Interactive guided prompts
+```
+
+### Commits Created
+
+**8 Commits Total**:
+1. `e90a8f3` - feat(cli-dlp): Initial CLI with portfolio management (19 files)
+2. `3638d8a` - chore(cli-dlp): Package configuration
+3. `642a5f9` - docs: CLI separation (traders vs DLPs)
+4. `6f485f7` - docs: v0.5 settlement model
+5. `551ac63` - feat(cli-dlp): Slab commands (create, view)
+6. `3fc17cf` - docs(cli-dlp): Implementation summary
+7. `655dbcc` - chore(cli-dlp): npm publishing setup
+8. `8fd3df7` - chore(cli-dlp): Version update to 0.1.1
+
+**Lines of Code**: ~4,000 TypeScript (including tests + documentation)
+
+### Technical Lessons
+
+1. **CLI Separation Benefits**: Clear roles prevent confusion between DLP and trader workflows
+2. **TypeScript DX Advantage**: Interactive prompts + formatted output >> raw CLI flags
+3. **Safety-First Design**: Validation prevents costly mistakes (e.g., withdraw with open positions)
+4. **npm Distribution**: Easy installation via `npm install -g` vs manual Rust builds
+5. **Test Coverage Matters**: 70% minimum ensures reliability and prevents regressions
+6. **Documentation is Key**: Comprehensive README examples reduce support burden
+7. **Interactive Workflows**: Guided prompts improve UX for complex operations
+8. **Environment Variables**: Default values reduce repetitive flag passing
+
