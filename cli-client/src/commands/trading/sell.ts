@@ -8,8 +8,8 @@ import ora from 'ora';
 import BN from 'bn.js';
 
 interface SellOptions {
-  slab?: string;       // Manual slab selection
-  instrument?: string; // Smart routing by instrument (NEW)
+  slab: string;        // Required in v0 (cross-slab routing disabled)
+  instrument?: string; // Optional: instrument selection within slab (for v1+ multi-instrument slabs)
   quantity: string;
   price?: string;  // Optional: if not provided, market order
   leverage?: string;  // Optional: "5x", "10x", etc. Default: 1x (spot)
@@ -38,20 +38,12 @@ export async function sellCommand(options: SellOptions): Promise<void> {
   const spinner = ora('Loading configuration...').start();
 
   try {
-    // Validate mutually exclusive flags
-    if (options.slab && options.instrument) {
+    // v0: Validate slab is provided (cross-slab routing disabled)
+    if (!options.slab) {
       spinner.fail();
-      displayError('Cannot specify both --slab and --instrument. Choose one.');
-      console.log(chalk.gray('\nUse --slab for manual selection or --instrument for smart routing\n'));
-      process.exit(1);
-    }
-
-    if (!options.slab && !options.instrument) {
-      spinner.fail();
-      displayError('Must specify either --slab or --instrument');
-      console.log(chalk.gray('\nExamples:'));
-      console.log(chalk.cyan('  barista sell --slab SLaBZ6Ps... -q 100'));
-      console.log(chalk.cyan('  barista sell --instrument <INSTRUMENT_PUBKEY> -q 100\n'));
+      displayError('v0 requires --slab (cross-slab routing disabled)');
+      console.log(chalk.gray('\nExample:'));
+      console.log(chalk.cyan('  barista sell --slab <SLAB_ADDRESS> -q 100\n'));
       process.exit(1);
     }
 

@@ -23,9 +23,11 @@ program
 v0 Limitations:
   • Market orders only - executes instantly at oracle price (±0.5% slippage)
   • Limit orders execute instantly (NOT resting orders) - price validation only
-  • Single instrument per slab (v1+: up to 32 instruments)
+  • Single slab execution - must specify --slab (v1+: cross-slab smart routing)
+  • Single instrument per slab currently (v1+: up to 32 instruments per slab)
   • Atomic fills - no partial fills or order book
   • SOL collateral only (v1+: multi-collateral support)
+  • PnL settles against single LP/DLP vault per slab (v1+: order book settlement)
 
 Oracle Integration:
   • All trades validated against oracle prices
@@ -77,9 +79,9 @@ program
 
 program
   .command('buy')
-  .description('Execute a buy order with smart routing or manual slab selection')
-  .option('--slab <address>', 'Slab market address (manual selection)')
-  .option('--instrument <pubkey>', 'Instrument pubkey for smart routing (finds best price)')
+  .description('Execute a buy order on a specific slab (v0: single slab only)')
+  .requiredOption('--slab <address>', 'Slab market address (required in v0)')
+  .option('--instrument <pubkey>', 'Instrument pubkey (optional, for v1+ multi-instrument slabs)')
   .requiredOption('-q, --quantity <amount>', 'Margin to commit (in base units). With leverage, actual position = quantity × leverage')
   .option('-p, --price <price>', 'Limit price (optional, omit for market order)')
   .option('-l, --leverage <multiplier>', 'Leverage multiplier (e.g., "5x", "10x"). Default: 1x (spot trading)')
@@ -90,9 +92,9 @@ program
 
 program
   .command('sell')
-  .description('Execute a sell order with smart routing or manual slab selection')
-  .option('--slab <address>', 'Slab market address (manual selection)')
-  .option('--instrument <pubkey>', 'Instrument pubkey for smart routing (finds best price)')
+  .description('Execute a sell order on a specific slab (v0: single slab only)')
+  .requiredOption('--slab <address>', 'Slab market address (required in v0)')
+  .option('--instrument <pubkey>', 'Instrument pubkey (optional, for v1+ multi-instrument slabs)')
   .requiredOption('-q, --quantity <amount>', 'Margin to commit (in base units). With leverage, actual position = quantity × leverage')
   .option('-p, --price <price>', 'Limit price (optional, omit for market order)')
   .option('-l, --leverage <multiplier>', 'Leverage multiplier (e.g., "5x", "10x"). Default: 1x (spot trading)')

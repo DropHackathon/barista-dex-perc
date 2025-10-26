@@ -169,6 +169,13 @@ pub fn process_execute_cross_slab(
         current_slot,
     );
 
+    // v0 Limitation: Only single slab execution (no cross-slab routing)
+    // Cross-slab routing requires order book model for proper PnL settlement
+    if slab_accounts.len() != 1 {
+        msg!("Error: v0 only supports single slab execution");
+        return Err(PercolatorError::InvalidInstruction);
+    }
+
     // Verify we have matching number of slabs, receipts, and oracles
     if slab_accounts.len() != receipt_accounts.len()
         || slab_accounts.len() != oracle_accounts.len()
