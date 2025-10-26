@@ -35,13 +35,8 @@ describe('CLI Commands Integration', () => {
       mockExit.mockRestore();
     });
 
-    it('depositCommand should validate required mint option', async () => {
-      const options = { amount: '1000000' };
-      await expect(depositCommand(options as any)).rejects.toThrow();
-    });
-
     it('depositCommand should validate required amount option', async () => {
-      const options = { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' };
+      const options = {};
       await expect(depositCommand(options as any)).rejects.toThrow();
     });
 

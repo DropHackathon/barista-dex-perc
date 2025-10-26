@@ -128,9 +128,9 @@ describe('RouterClient', () => {
     });
 
     describe('buildExecuteCrossSlabInstruction', () => {
-      it('should build valid instruction with single split', () => {
+      it('should build valid instruction with single split (v0.5)', () => {
         const user = wallet.publicKey;
-        const slabProgram = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
         const splits: SlabSplit[] = [
           {
             slabMarket: PublicKey.unique(),
@@ -138,21 +138,23 @@ describe('RouterClient', () => {
             qty: new BN(1000000),
             limitPx: new BN(50000000),
             oracle: PublicKey.unique(),
+            dlpOwner, // v0.5: Required for PnL settlement
           },
         ];
 
         const ix = client.buildExecuteCrossSlabInstruction(user, splits);
 
         expect(ix.programId.equals(programId)).toBe(true);
-        // 5 base + 1 slab + 1 receipt + 1 oracle = 8 accounts
-        expect(ix.keys.length).toBe(8);
+        // v0.5: 6 base (user_portfolio, user, dlp_portfolio, registry, authority, system_program)
+        // + 1 slab + 1 receipt + 1 oracle = 9 accounts
+        expect(ix.keys.length).toBe(9);
         expect(ix.data[0]).toBe(RouterInstruction.ExecuteCrossSlab);
         expect(ix.data[1]).toBe(1); // num_splits
       });
 
-      it('should build valid instruction with multiple splits', () => {
+      it('should throw error for multiple splits (v0.5 limitation)', () => {
         const user = wallet.publicKey;
-        const slabProgram = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
         const splits: SlabSplit[] = [
           {
             slabMarket: PublicKey.unique(),
@@ -160,6 +162,7 @@ describe('RouterClient', () => {
             qty: new BN(1000000),
             limitPx: new BN(50000000),
             oracle: PublicKey.unique(),
+            dlpOwner,
           },
           {
             slabMarket: PublicKey.unique(),
@@ -167,14 +170,32 @@ describe('RouterClient', () => {
             qty: new BN(500000),
             limitPx: new BN(51000000),
             oracle: PublicKey.unique(),
+            dlpOwner,
           },
         ];
 
-        const ix = client.buildExecuteCrossSlabInstruction(user, splits);
+        // v0.5: Cross-slab routing disabled
+        expect(() => {
+          client.buildExecuteCrossSlabInstruction(user, splits);
+        }).toThrow(/v0.5 only supports single slab execution/);
+      });
 
-        // 5 base + 2 slabs + 2 receipts + 2 oracles = 11 accounts
-        expect(ix.keys.length).toBe(11);
-        expect(ix.data[1]).toBe(2); // num_splits
+      it('should throw error when dlpOwner is missing (v0.5)', () => {
+        const user = wallet.publicKey;
+        const splits: SlabSplit[] = [
+          {
+            slabMarket: PublicKey.unique(),
+            side: 0,
+            qty: new BN(1000000),
+            limitPx: new BN(50000000),
+            oracle: PublicKey.unique(),
+            // dlpOwner missing
+          },
+        ];
+
+        expect(() => {
+          client.buildExecuteCrossSlabInstruction(user, splits);
+        }).toThrow(/DLP owner .* must be provided/);
       });
     });
 
@@ -1230,16 +1251,18 @@ describe('RouterClient', () => {
       });
     });
 
-    describe('buildBuyInstruction with auto-oracle-fetch', () => {
-      it('should auto-fetch oracle when not provided', async () => {
+    describe('buildBuyInstruction with auto-oracle-fetch (v0.5)', () => {
+      it('should auto-fetch oracle and DLP owner when not provided', async () => {
         const user = PublicKey.unique();
         const slabMarket = PublicKey.unique();
         const oracleId = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
         const quantity = new BN(1000);
         const price = new BN(50000000);
 
-        // Mock getOracleForSlab
+        // Mock getOracleForSlab and getDlpOwnerForSlab
         jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(dlpOwner);
 
         const instruction = await client.buildBuyInstruction(
           user,
@@ -1250,18 +1273,21 @@ describe('RouterClient', () => {
         );
 
         expect(client.getOracleForSlab).toHaveBeenCalledWith(slabMarket);
+        expect(client.getDlpOwnerForSlab).toHaveBeenCalledWith(slabMarket);
         expect(instruction).toBeDefined();
         expect(instruction.keys.length).toBeGreaterThan(0);
       });
 
-      it('should use provided oracle when specified', async () => {
+      it('should use provided oracle but still fetch DLP owner', async () => {
         const user = PublicKey.unique();
         const slabMarket = PublicKey.unique();
         const providedOracle = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
         const quantity = new BN(1000);
         const price = new BN(50000000);
 
         const getOracleSpy = jest.spyOn(client, 'getOracleForSlab');
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(dlpOwner);
 
         const instruction = await client.buildBuyInstruction(
           user,
@@ -1273,6 +1299,8 @@ describe('RouterClient', () => {
 
         // Should NOT call getOracleForSlab
         expect(getOracleSpy).not.toHaveBeenCalled();
+        // Should still fetch DLP owner (v0.5 requirement)
+        expect(client.getDlpOwnerForSlab).toHaveBeenCalledWith(slabMarket);
         expect(instruction).toBeDefined();
       });
 
@@ -1289,18 +1317,36 @@ describe('RouterClient', () => {
           client.buildBuyInstruction(user, slabMarket, quantity, price)
         ).rejects.toThrow(/Oracle not found for slab/);
       });
-    });
 
-    describe('buildSellInstruction with auto-oracle-fetch', () => {
-      it('should auto-fetch oracle when not provided', async () => {
+      it('should throw error when DLP owner not found (v0.5)', async () => {
         const user = PublicKey.unique();
         const slabMarket = PublicKey.unique();
         const oracleId = PublicKey.unique();
         const quantity = new BN(1000);
         const price = new BN(50000000);
 
-        // Mock getOracleForSlab
+        // Mock successful oracle fetch but failed DLP owner fetch
         jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(null);
+
+        await expect(
+          client.buildBuyInstruction(user, slabMarket, quantity, price)
+        ).rejects.toThrow(/Failed to fetch DLP owner for slab/);
+      });
+    });
+
+    describe('buildSellInstruction with auto-oracle-fetch (v0.5)', () => {
+      it('should auto-fetch oracle and DLP owner when not provided', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock getOracleForSlab and getDlpOwnerForSlab
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(dlpOwner);
 
         const instruction = await client.buildSellInstruction(
           user,
@@ -1311,18 +1357,21 @@ describe('RouterClient', () => {
         );
 
         expect(client.getOracleForSlab).toHaveBeenCalledWith(slabMarket);
+        expect(client.getDlpOwnerForSlab).toHaveBeenCalledWith(slabMarket);
         expect(instruction).toBeDefined();
         expect(instruction.keys.length).toBeGreaterThan(0);
       });
 
-      it('should use provided oracle when specified', async () => {
+      it('should use provided oracle but still fetch DLP owner', async () => {
         const user = PublicKey.unique();
         const slabMarket = PublicKey.unique();
         const providedOracle = PublicKey.unique();
+        const dlpOwner = PublicKey.unique();
         const quantity = new BN(1000);
         const price = new BN(50000000);
 
         const getOracleSpy = jest.spyOn(client, 'getOracleForSlab');
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(dlpOwner);
 
         const instruction = await client.buildSellInstruction(
           user,
@@ -1334,6 +1383,8 @@ describe('RouterClient', () => {
 
         // Should NOT call getOracleForSlab
         expect(getOracleSpy).not.toHaveBeenCalled();
+        // Should still fetch DLP owner (v0.5 requirement)
+        expect(client.getDlpOwnerForSlab).toHaveBeenCalledWith(slabMarket);
         expect(instruction).toBeDefined();
       });
 
@@ -1349,6 +1400,22 @@ describe('RouterClient', () => {
         await expect(
           client.buildSellInstruction(user, slabMarket, quantity, price)
         ).rejects.toThrow(/Oracle not found for slab/);
+      });
+
+      it('should throw error when DLP owner not found (v0.5)', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock successful oracle fetch but failed DLP owner fetch
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+        jest.spyOn(client, 'getDlpOwnerForSlab').mockResolvedValue(null);
+
+        await expect(
+          client.buildSellInstruction(user, slabMarket, quantity, price)
+        ).rejects.toThrow(/Failed to fetch DLP owner for slab/);
       });
     });
   });
