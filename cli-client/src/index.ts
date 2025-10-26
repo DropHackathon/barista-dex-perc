@@ -136,10 +136,25 @@ program
 
 program
   .command('price')
-  .description('Get current market price (best bid/ask)')
-  .requiredOption('--slab <address>', 'Slab address')
+  .description('Get current price (market or oracle)')
+  .option('--slab <address>', 'Slab address (for market price)')
+  .option('--oracle <address>', 'Oracle address (for oracle price - testing only)')
+  .option('--instrument <address>', 'Instrument address (derives oracle - testing only)')
   .option('-n, --network <network>', 'Network: devnet, mainnet-beta, or localnet (default: mainnet-beta)')
   .option('-u, --url <url>', 'Custom RPC URL (overrides network default)')
+  .addHelpText('after', `
+Examples:
+  # Market price (order book bid/ask)
+  $ barista price --slab <SLAB_ADDRESS>
+
+  # Oracle price by instrument (v0 testing)
+  $ barista price --instrument <INSTRUMENT_ADDRESS>
+
+  # Oracle price by oracle address (v0 testing)
+  $ barista price --oracle <ORACLE_ADDRESS>
+
+Note: Oracle prices are for v0 localnet/devnet testing only. Production will use order book prices.
+`)
   .action(priceCommand);
 
 program

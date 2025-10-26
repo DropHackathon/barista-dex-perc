@@ -15,8 +15,16 @@ import {
 export interface NetworkConfig {
   routerProgramId: PublicKey;
   slabProgramId: PublicKey;
+  oracleProgramId: PublicKey;
   rpcUrl: string;
 }
+
+// Oracle program IDs (placeholder - update with actual deployed IDs)
+export const ORACLE_PROGRAM_IDS: Record<Cluster, PublicKey> = {
+  'mainnet-beta': new PublicKey('11111111111111111111111111111111'), // TODO: Deploy
+  'devnet': new PublicKey('11111111111111111111111111111111'), // TODO: Deploy
+  'localnet': new PublicKey('11111111111111111111111111111111'), // TODO: Set from deployment
+};
 
 /**
  * Supported networks (re-exported from SDK)
@@ -31,16 +39,19 @@ export const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
   'mainnet-beta': {
     routerProgramId: ROUTER_PROGRAM_IDS['mainnet-beta'],
     slabProgramId: SLAB_PROGRAM_IDS['mainnet-beta'],
+    oracleProgramId: ORACLE_PROGRAM_IDS['mainnet-beta'],
     rpcUrl: RPC_ENDPOINTS['mainnet-beta'],
   },
   'devnet': {
     routerProgramId: ROUTER_PROGRAM_IDS.devnet,
     slabProgramId: SLAB_PROGRAM_IDS.devnet,
+    oracleProgramId: ORACLE_PROGRAM_IDS.devnet,
     rpcUrl: RPC_ENDPOINTS.devnet,
   },
   'localnet': {
     routerProgramId: ROUTER_PROGRAM_IDS.localnet,
     slabProgramId: SLAB_PROGRAM_IDS.localnet,
+    oracleProgramId: ORACLE_PROGRAM_IDS.localnet,
     rpcUrl: RPC_ENDPOINTS.localnet,
   },
 };
@@ -53,6 +64,7 @@ export const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
  * - BARISTA_RPC_URL: Custom RPC URL (overrides network default)
  * - BARISTA_ROUTER_PROGRAM: Custom router program ID
  * - BARISTA_SLAB_PROGRAM: Custom slab program ID
+ * - BARISTA_ORACLE_PROGRAM: Custom oracle program ID
  *
  * @param networkName Network name (defaults to mainnet-beta)
  * @returns Network configuration with any env var overrides applied
@@ -79,6 +91,10 @@ export function getNetworkConfig(networkName?: string): NetworkConfig {
 
   if (process.env.BARISTA_SLAB_PROGRAM) {
     config.slabProgramId = new PublicKey(process.env.BARISTA_SLAB_PROGRAM);
+  }
+
+  if (process.env.BARISTA_ORACLE_PROGRAM) {
+    config.oracleProgramId = new PublicKey(process.env.BARISTA_ORACLE_PROGRAM);
   }
 
   return config;
