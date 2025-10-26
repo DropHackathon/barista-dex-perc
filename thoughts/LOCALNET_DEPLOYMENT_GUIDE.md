@@ -177,7 +177,7 @@ solana program show <ROUTER_PROGRAM_ID>
 
 ### Step 8: Update CLI Configuration
 
-Edit `cli/src/config/networks.ts`:
+Edit `cli-client/src/config/networks.ts`:
 
 ```typescript
 export const NETWORKS: Record<string, NetworkConfig> = {
@@ -233,7 +233,7 @@ cd sdk
 npm run build
 
 # Rebuild CLI with new program IDs
-cd ../cli
+cd ../cli-client
 npm run build
 ```
 
@@ -241,97 +241,85 @@ npm run build
 
 ## Initialization & Testing
 
-### Step 11: Initialize Router
+### Step 11: Available CLI Commands
 
-The router needs to be initialized once to create global state:
+The TypeScript CLI (`cli-client/`) currently supports the following commands:
 
-```bash
-# From cli directory
-cd cli
+**Portfolio Management:**
+- `portfolio` - View portfolio state
+- `deposit` - Deposit collateral to vault
+- `withdraw` - Withdraw collateral from vault
 
-# Initialize router (creates Registry and Authority PDAs)
-node dist/index.js init --network localnet
+**Trading:**
+- `buy` - Execute a buy order (market or limit)
+- `sell` - Execute a sell order (market or limit)
 
-# Expected output:
-# ✓ Router initialized successfully!
-#   Registry: <registry-pda-address>
-#   Authority: <authority-pda-address>
-```
+**Discovery:**
+- `slabs` - List all available LP-run slabs
+- `slab` - Show detailed information about a slab
+- `instruments` - List instruments (markets) in a slab
+- `price` - Get current market price (best bid/ask)
+- `book` - View order book depth
 
-**Note**: This only needs to be done **once** per deployment.
+**Note:** Router initialization and portfolio creation are not yet implemented in the TypeScript CLI. These must be done via the SDK or Rust CLI for now.
 
-### Step 12: Create Portfolio
-
-```bash
-# View/create your portfolio
-node dist/index.js portfolio --network localnet
-
-# First time output:
-# ✓ Portfolio created successfully!
-#   Address: <portfolio-pda>
-#   Equity: 0
-#   IM: 0
-#   Positions: []
-
-# Subsequent calls show portfolio state:
-# Portfolio: <address>
-# Equity: 0 units
-# Initial Margin: 0 units
-# Positions: None
-```
-
-### Step 13: Deposit Collateral
-
-Before trading, you need collateral in your portfolio:
+### Step 12: Test Available Commands
 
 ```bash
-# First, you'll need a token mint (USDC-like token)
-# For testing, you can create a mock token:
+# From cli-client directory
+cd cli-client
 
-# Create a test token mint
-spl-token create-token
-# Save the Token Address shown
-
-# Create token account
-spl-token create-account <TOKEN_MINT_ADDRESS>
-
-# Mint some tokens to yourself (1,000,000 = 1 USDC with 6 decimals)
-spl-token mint <TOKEN_MINT_ADDRESS> 1000000000
-
-# Deposit to Barista portfolio
-node dist/index.js deposit \
-  --mint <TOKEN_MINT_ADDRESS> \
-  --amount 1000000000 \
-  --network localnet
-
-# Verify deposit
-node dist/index.js portfolio --network localnet
-# Should show: Equity: 1000000000 units
-```
-
-### Step 14: Test Trading (Once Slab Exists)
-
-```bash
-# List available slabs
+# List available slabs (will be empty initially)
 node dist/index.js slabs --network localnet
 
-# Get slab info
-node dist/index.js slab --slab <SLAB_ADDRESS> --network localnet
-
-# Execute a buy order
-node dist/index.js buy \
-  --slab <SLAB_ADDRESS> \
-  -q 100 \
-  -p 50000000 \
-  --network localnet
-
-# Execute a sell order
-node dist/index.js sell \
-  --slab <SLAB_ADDRESS> \
-  -q 50 \
-  -p 51000000 \
-  --network localnet
+# Get help for any command
+node dist/index.js --help
+node dist/index.js portfolio --help
+node dist/index.js deposit --help
 ```
+
+### Step 13: Understanding Router Initialization
+
+**Router Initialization** creates the global `SlabRegistry` account that stores:
+- Governance authority
+- Risk parameters (IMR, MMR, liquidation bands)
+- Insurance fund configuration
+- PnL vesting parameters
+- Registered slabs list
+
+This is a **one-time protocol-level operation** performed by the deployer, not traders.
+
+**Important Distinction:**
+- **Router Initialization** = Protocol-level (deployer does once)
+- **Portfolio Creation** = User-level (each trader does once)
+
+### Step 14: Portfolio Creation (Automatic)
+
+While router initialization is a protocol operator task, **portfolio creation is a normal user operation**.
+
+**Good news:** Portfolio creation is **automatic** - you don't need to manually initialize it!
+
+The TypeScript CLI automatically creates your portfolio on first use:
+- First `deposit` command → Creates portfolio automatically
+- First `buy`/`sell` command → Creates portfolio automatically
+
+**Behind the scenes:**
+The CLI checks if your portfolio exists before each transaction. If it doesn't exist, it adds portfolio creation instructions to the same transaction atomically.
+
+**For SDK users:**
+If you're using the SDK directly, you can use the `ensurePortfolioInstructions()` helper:
+
+```typescript
+// Automatically add portfolio creation if needed
+const ensurePortfolioIxs = await client.ensurePortfolioInstructions(wallet.publicKey);
+const depositIx = client.buildDepositInstruction(...);
+
+const transaction = new Transaction()
+  .add(...ensurePortfolioIxs)  // Empty array if portfolio exists, creation ixs if not
+  .add(depositIx);
+```
+
+**Note:** Portfolio uses `create_with_seed` (NOT PDA) to bypass Solana's 10KB CPI limit, since portfolios are ~136KB.
 
 ---
 
@@ -542,7 +530,7 @@ solana program deploy \
 
 1. Verify validator is running: `solana cluster-version`
 2. Check program IDs in config files match deployed IDs
-3. Rebuild CLI: `cd cli && npm run build`
+3. Rebuild CLI: `cd cli-client && npm run build`
 4. Verify network setting: `node dist/index.js portfolio --network localnet`
 
 ### Transaction Fails: "Custom program error: 0x1"
@@ -580,11 +568,11 @@ solana airdrop 10
 # Check balance
 solana balance
 
-# View portfolio
+# View portfolio (requires portfolio to exist first)
 node dist/index.js portfolio --network localnet
 
-# Initialize router (once)
-node dist/index.js init --network localnet
+# List slabs
+node dist/index.js slabs --network localnet
 ```
 
 ### Environment Variables
@@ -606,21 +594,46 @@ export BARISTA_KEYPAIR_PATH=/path/to/keypair.json
 - **Program keypairs**: `target/deploy/*-keypair.json`
 - **Solana config**: `~/.config/solana/cli/config.yml`
 - **Default wallet**: `~/.config/solana/id.json`
-- **CLI config**: `cli/src/config/networks.ts`
+- **CLI config**: `cli-client/src/config/networks.ts`
 - **SDK config**: `sdk/src/constants.ts`
 
 ---
 
 ## Next Steps
 
-After successful localnet deployment:
+After successful localnet deployment, you have deployed the programs but will need additional tooling to fully interact with them:
 
-1. **Create Slabs**: Deploy LP-run slabs for specific instruments
-2. **Test Trading**: Execute buy/sell orders
-3. **Oracle Integration**: Test with custom or Pyth oracles
-4. **Leverage Trading**: Test spot and margin trades
-5. **Portfolio Margining**: Test cross-margin calculations
-6. **Liquidations**: Test liquidation mechanics
+### User Roles and Tooling
+
+**End Users (Traders)** → TypeScript CLI (`cli-client/`):
+- ✅ Portfolio viewing
+- ✅ Discovery (slabs, instruments, prices)
+- ✅ Trading (buy/sell orders)
+- ✅ Deposits/withdrawals
+
+**Protocol Operators (Deployers)** → SDK or Rust CLI (`cli/`):
+- Router initialization (one-time per deployment)
+- Slab/market creation
+- Liquidity provisioning
+- Keeper/oracle management
+
+### Testing Protocol Operations
+
+For protocol-level initialization and testing, use the **Rust CLI**:
+
+```bash
+# Build Rust CLI
+cd cli
+cargo build --release
+
+# Initialize router (one-time)
+./target/release/percolator margin init --network localnet
+
+# See all available commands
+./target/release/percolator --help
+```
+
+The TypeScript CLI intentionally excludes these protocol operator commands to keep it focused on end-user (trader) workflows.
 
 For production deployment to **devnet** or **mainnet-beta**, see `DEVNET_DEPLOYMENT_GUIDE.md` (TODO).
 

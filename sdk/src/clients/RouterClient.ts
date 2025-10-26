@@ -119,12 +119,13 @@ export class RouterClient {
 
   /**
    * Fetch Portfolio account data
+   * NOTE: Portfolio uses create_with_seed (NOT PDA)
    * @param user User's public key
    * @returns Portfolio data
    */
   async getPortfolio(user: PublicKey): Promise<Portfolio | null> {
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const accountInfo = await this.connection.getAccountInfo(portfolioPDA);
+    const portfolioAddress = await this.derivePortfolioAddress(user);
+    const accountInfo = await this.connection.getAccountInfo(portfolioAddress);
 
     if (!accountInfo) {
       return null;
@@ -537,7 +538,88 @@ export class RouterClient {
   }
 
   /**
-   * Build InitializePortfolio instruction
+   * Derive portfolio account address using create_with_seed
+   * NOTE: Portfolio uses create_with_seed (NOT PDA) to bypass 10KB CPI limit
+   * @param user User's public key
+   * @returns Portfolio address
+   */
+  async derivePortfolioAddress(user: PublicKey): Promise<PublicKey> {
+    return await PublicKey.createWithSeed(
+      user,
+      'portfolio',
+      this.programId
+    );
+  }
+
+  /**
+   * Initialize a portfolio account for a user
+   * Creates the portfolio account and initializes it in a single transaction
+   * NOTE: Portfolio uses create_with_seed (NOT PDA) to bypass 10KB CPI limit
+   * @param user User's public key (must be signer)
+   * @param portfolioSize Size of portfolio account in bytes (default: 139264)
+   * @returns Array of instructions [createAccountInstruction, initializeInstruction]
+   */
+  async buildInitializePortfolioInstructions(
+    user: PublicKey,
+    portfolioSize: number = 139264  // Portfolio::LEN (~136KB)
+  ): Promise<TransactionInstruction[]> {
+    // Derive portfolio address using create_with_seed
+    const portfolioAddress = await this.derivePortfolioAddress(user);
+
+    // Get rent exemption amount
+    const rentExemption = await this.connection.getMinimumBalanceForRentExemption(portfolioSize);
+
+    // Instruction 1: Create account with seed
+    const createAccountIx = SystemProgram.createAccountWithSeed({
+      fromPubkey: user,
+      newAccountPubkey: portfolioAddress,
+      basePubkey: user,
+      seed: 'portfolio',
+      lamports: rentExemption,
+      space: portfolioSize,
+      programId: this.programId,
+    });
+
+    // Instruction 2: Initialize portfolio
+    // Data format: [discriminator (1 byte), user_pubkey (32 bytes)]
+    const instructionData = Buffer.alloc(33);
+    instructionData.writeUInt8(RouterInstruction.InitializePortfolio, 0);
+    user.toBuffer().copy(instructionData, 1);
+
+    const initializeIx = new TransactionInstruction({
+      programId: this.programId,
+      keys: [
+        { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+        { pubkey: user, isSigner: true, isWritable: true },
+      ],
+      data: instructionData,
+    });
+
+    return [createAccountIx, initializeIx];
+  }
+
+  /**
+   * Ensure portfolio exists, creating it if necessary
+   * Returns instructions to prepend to transaction if portfolio doesn't exist
+   * @param user User's public key
+   * @returns Array of instructions (empty if portfolio exists, initialization instructions if not)
+   */
+  async ensurePortfolioInstructions(user: PublicKey): Promise<TransactionInstruction[]> {
+    const portfolioAddress = await this.derivePortfolioAddress(user);
+    const accountInfo = await this.connection.getAccountInfo(portfolioAddress);
+
+    // Portfolio already exists
+    if (accountInfo && accountInfo.owner.equals(this.programId)) {
+      return [];
+    }
+
+    // Portfolio doesn't exist, return initialization instructions
+    return await this.buildInitializePortfolioInstructions(user);
+  }
+
+  /**
+   * Build InitializePortfolio instruction (DEPRECATED - use buildInitializePortfolioInstructions)
+   * @deprecated This method incorrectly uses PDA. Use buildInitializePortfolioInstructions instead.
    * @param user User's public key
    * @returns TransactionInstruction
    */

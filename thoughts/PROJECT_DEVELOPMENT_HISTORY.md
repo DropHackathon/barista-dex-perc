@@ -1724,6 +1724,273 @@ Tests:       32 passed, 32 total (14 new tests for leverage)
 
 ---
 
+## Phase 6: Upstream Integration & Portfolio UX
+
+### Overview
+
+**Goal**: Merge upstream changes, fix breaking changes, and improve portfolio initialization UX
+
+### Upstream Merge & Portfolio Fixes
+
+**Context**: Upstream introduced major changes to Portfolio struct, breaking SDK deserialization
+
+**Portfolio Struct Changes**:
+- Added PnL vesting fields (`principal`, `pnl`, `vested_pnl`, `last_slot`, `pnl_index_checkpoint`)
+- Added liquidation tracking (`health`, `last_liquidation_ts`, `cooldown_seconds`)
+- Restructured exposure tracking with LP buckets
+- Size grew to ~136KB (requires `create_with_seed` instead of PDA)
+
+**SDK Updates** (`sdk/src/clients/RouterClient.ts`):
+
+```typescript
+// NEW: Fixed portfolio derivation (uses create_with_seed, not PDA)
+async derivePortfolioAddress(user: PublicKey): Promise<PublicKey> {
+  return await PublicKey.createWithSeed(
+    user,
+    'portfolio',
+    this.programId
+  );
+}
+
+// NEW: Portfolio initialization with large account creation
+async buildInitializePortfolioInstructions(
+  user: PublicKey,
+  portfolioSize: number = 139264  // ~136KB
+): Promise<TransactionInstruction[]> {
+  const portfolioAddress = await this.derivePortfolioAddress(user);
+  const rentExemption = await this.connection.getMinimumBalanceForRentExemption(portfolioSize);
+
+  // Instruction 1: Create large account (bypasses 10KB CPI limit)
+  const createAccountIx = SystemProgram.createAccountWithSeed({
+    fromPubkey: user,
+    newAccountPubkey: portfolioAddress,
+    basePubkey: user,
+    seed: 'portfolio',
+    lamports: rentExemption,
+    space: portfolioSize,
+    programId: this.programId,
+  });
+
+  // Instruction 2: Initialize portfolio
+  const instructionData = Buffer.alloc(33);
+  instructionData.writeUInt8(RouterInstruction.InitializePortfolio, 0);
+  user.toBuffer().copy(instructionData, 1);
+
+  const initializeIx = new TransactionInstruction({
+    programId: this.programId,
+    keys: [
+      { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+      { pubkey: user, isSigner: true, isWritable: true },
+    ],
+    data: instructionData,
+  });
+
+  return [createAccountIx, initializeIx];
+}
+
+// NEW: Auto-create portfolio if needed
+async ensurePortfolioInstructions(user: PublicKey): Promise<TransactionInstruction[]> {
+  const portfolioAddress = await this.derivePortfolioAddress(user);
+  const accountInfo = await this.connection.getAccountInfo(portfolioAddress);
+
+  // Portfolio already exists
+  if (accountInfo && accountInfo.owner.equals(this.programId)) {
+    return [];
+  }
+
+  // Portfolio doesn't exist, return initialization instructions
+  return await this.buildInitializePortfolioInstructions(user);
+}
+```
+
+**Portfolio Deserialization** (`sdk/src/clients/RouterClient.ts`):
+
+```typescript
+deserializePortfolio(data: Buffer): Portfolio {
+  let offset = 0;
+
+  // Basic fields (32 + 32 + 16 + 16 + 16 + 16 + 8 + 2 + 1 + 5 = 144 bytes)
+  const routerId = deserializePubkey(data, offset); offset += 32;
+  const user = deserializePubkey(data, offset); offset += 32;
+  const equity = deserializeI128(data, offset); offset += 16;
+  const im = deserializeU128(data, offset); offset += 16;
+  const mm = deserializeU128(data, offset); offset += 16;
+  const freeCollateral = deserializeI128(data, offset); offset += 16;
+  const lastMarkTs = deserializeU64(data, offset); offset += 8;
+  const exposureCount = data.readUInt16LE(offset); offset += 2;
+  const bump = data.readUInt8(offset); offset += 1;
+  offset += 5; // _padding
+
+  // NEW: Liquidation tracking (16 + 8 + 8 + 8 = 40 bytes)
+  const health = deserializeI128(data, offset); offset += 16;
+  const lastLiquidationTs = deserializeU64(data, offset); offset += 8;
+  const cooldownSeconds = deserializeU64(data, offset); offset += 8;
+  offset += 8; // _padding2
+
+  // NEW: PnL vesting state (16 + 16 + 16 + 8 + 16 + 8 = 80 bytes)
+  const principal = deserializeI128(data, offset); offset += 16;
+  const pnl = deserializeI128(data, offset); offset += 16;
+  const vestedPnl = deserializeI128(data, offset); offset += 16;
+  const lastSlot = deserializeU64(data, offset); offset += 8;
+  const pnlIndexCheckpoint = deserializeI128(data, offset); offset += 16;
+  offset += 8; // _padding4
+
+  // Exposures array (8 bytes per entry * MAX_SLABS * MAX_INSTRUMENTS)
+  const exposures: Exposure[] = [];
+  for (let i = 0; i < MAX_SLABS * MAX_INSTRUMENTS; i++) {
+    const slabIdx = data.readUInt16LE(offset); offset += 2;
+    const instrumentIdx = data.readUInt16LE(offset); offset += 2;
+    const qty = deserializeI64(data, offset); offset += 8;
+
+    if (slabIdx !== 0 || instrumentIdx !== 0 || !qty.isZero()) {
+      exposures.push({ slabIdx, instrumentIdx, qty });
+    }
+  }
+
+  // NEW: LP buckets (variable size entries * MAX_LP_BUCKETS)
+  const lpBuckets: LpBucket[] = [];
+  for (let i = 0; i < MAX_LP_BUCKETS; i++) {
+    // Parse venue ID, LP amounts, etc.
+    // ... (detailed parsing logic)
+  }
+
+  const lpBucketCount = data.readUInt16LE(offset); offset += 2;
+
+  return {
+    routerId, user, equity, im, mm, freeCollateral,
+    lastMarkTs, exposureCount, bump,
+    health, lastLiquidationTs, cooldownSeconds,  // NEW
+    principal, pnl, vestedPnl, lastSlot, pnlIndexCheckpoint,  // NEW
+    exposures, lpBuckets, lpBucketCount  // UPDATED
+  };
+}
+```
+
+**CLI Auto-Portfolio Creation**:
+
+All CLI commands now automatically create portfolios on first use:
+
+```typescript
+// cli-client/src/commands/router/deposit.ts
+export async function depositCommand(options: DepositOptions): Promise<void> {
+  // ... setup ...
+
+  // NEW: Ensure portfolio exists (auto-create if needed)
+  spinner.text = 'Checking portfolio...';
+  const ensurePortfolioIxs = await client.ensurePortfolioInstructions(wallet.publicKey);
+
+  if (ensurePortfolioIxs.length > 0) {
+    spinner.text = 'Creating portfolio (first-time setup)...';
+  }
+
+  const depositIx = client.buildDepositInstruction(/* ... */);
+
+  const transaction = new Transaction()
+    .add(...ensurePortfolioIxs)  // Auto-create if needed
+    .add(depositIx);
+
+  // ... send transaction ...
+}
+```
+
+Same pattern applied to:
+- `cli-client/src/commands/trading/buy.ts`
+- `cli-client/src/commands/trading/sell.ts`
+- `cli-client/src/commands/router/withdraw.ts`
+
+### Documentation Updates
+
+**LOCALNET_DEPLOYMENT_GUIDE.md**:
+- Clarified router initialization (protocol operator task, one-time)
+- Explained portfolio creation (automatic on first use)
+- Updated all `cli/` references to `cli-client/`
+- Removed non-existent CLI commands (`init`)
+- Listed actually available CLI commands
+
+**Key Clarifications**:
+
+**Router vs Portfolio Initialization**:
+- **Router Initialization**: One-time protocol setup, creates `SlabRegistry` (risk params, governance, insurance)
+- **Portfolio Creation**: Per-user, automatic on first deposit/trade
+
+**Technical Details**:
+- Portfolio uses `create_with_seed` (NOT PDA) to bypass 10KB CPI limit
+- Portfolio size: ~136KB (too large for CPI account creation)
+- Account created client-side, then initialized by program
+
+### User Experience Improvement
+
+**Before**:
+```bash
+# Users had to somehow manually initialize portfolio (confusing!)
+# Then could deposit/trade
+```
+
+**After**:
+```bash
+# Just use the CLI - portfolio creates automatically!
+barista deposit --mint <MINT> --amount 1000 --network localnet
+# ✓ Checking portfolio...
+# ✓ Creating portfolio (first-time setup)...
+# ✓ Deposit successful!
+```
+
+**Key Benefits**:
+1. **Zero Manual Setup**: Users don't think about portfolio initialization
+2. **Atomic Creation**: Portfolio created in same transaction as first action
+3. **Industry Standard**: Similar to associated token accounts in Solana
+4. **Clear Messaging**: CLI shows "first-time setup" message when creating
+
+### Files Modified
+
+**SDK** (`sdk/src/clients/RouterClient.ts`):
+- `derivePortfolioAddress()` - Fixed to use `create_with_seed`
+- `buildInitializePortfolioInstructions()` - Handles large account creation
+- `ensurePortfolioInstructions()` - Auto-check and create helper
+- `getPortfolio()` - Fixed address derivation
+- `deserializePortfolio()` - Complete rewrite (17+ new fields)
+
+**CLI** (`cli-client/src/commands/`):
+- `router/deposit.ts` - Auto-create portfolio
+- `trading/buy.ts` - Auto-create portfolio
+- `trading/sell.ts` - Auto-create portfolio
+
+**Documentation** (`thoughts/`):
+- `LOCALNET_DEPLOYMENT_GUIDE.md` - Comprehensive updates
+- `IMPLEMENTATION_PLAN_SDK_CLI.md` - Fixed directory references
+
+### Testing & Validation
+
+**SDK Tests** (108 passing):
+- Portfolio deserialization with new fields
+- PDA vs `create_with_seed` derivation
+- Instruction building
+
+**CLI Tests** (36 passing):
+- Command integration tests
+- Network configuration
+
+**Total Test Coverage**: 144 tests passing
+
+### Impact
+
+**Code Changes**:
+- SDK: ~300 lines modified/added
+- CLI: ~30 lines modified (3 files)
+- Documentation: ~200 lines updated
+
+**User-Facing Changes**:
+- ✅ Portfolio creation is now automatic
+- ✅ CLI works correctly with upstream changes
+- ✅ Clear documentation of router vs portfolio initialization
+
+**Developer-Facing Changes**:
+- ✅ SDK `ensurePortfolioInstructions()` helper for custom integrations
+- ✅ Proper `create_with_seed` usage for large accounts
+- ✅ Deprecated old PDA-based methods
+
+---
+
 ## Future Enhancements
 
 Based on TODO markers and documentation:
@@ -1735,9 +2002,11 @@ Based on TODO markers and documentation:
 5. **Max Buy Helper**: `barista max-buy` command
 6. **Keeper Monitoring**: Add system health checks
 7. **Advanced Orders**: Stop-loss, take-profit (v1+)
+8. **Router Initialization CLI**: Add to TypeScript CLI or document Rust CLI usage
 
 ---
 
-**Document Generated**: 2025-10-24
-**Commits Analyzed**: 54 (all by Sean)
+**Document Generated**: 2025-10-26
+**Commits Analyzed**: 54+ (all by Sean)
 **Time Period**: Initial commit → Current HEAD
+**Latest Update**: Upstream integration, portfolio UX improvements

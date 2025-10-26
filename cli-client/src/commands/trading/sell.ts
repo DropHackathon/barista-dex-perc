@@ -172,6 +172,14 @@ export async function sellCommand(options: SellOptions): Promise<void> {
     console.log();
     spinner.start('Building sell transaction...');
 
+    // Ensure portfolio exists (auto-create if needed)
+    spinner.text = 'Checking portfolio...';
+    const ensurePortfolioIxs = await client.ensurePortfolioInstructions(wallet.publicKey);
+
+    if (ensurePortfolioIxs.length > 0) {
+      spinner.text = 'Creating portfolio (first-time setup)...';
+    }
+
     // Build sell instruction with ACTUAL quantity (leveraged)
     const sellIx = client.buildSellInstruction(
       wallet.publicKey,
@@ -181,7 +189,9 @@ export async function sellCommand(options: SellOptions): Promise<void> {
       config.slabProgramId
     );
 
-    const transaction = new Transaction().add(sellIx);
+    const transaction = new Transaction()
+      .add(...ensurePortfolioIxs)  // Auto-create portfolio if needed
+      .add(sellIx);
 
     // Send and confirm transaction
     spinner.text = 'Sending transaction...';

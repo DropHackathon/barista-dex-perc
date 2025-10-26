@@ -65,6 +65,14 @@ export async function depositCommand(options: DepositOptions): Promise<void> {
       wallet.publicKey
     );
 
+    // Ensure portfolio exists (auto-create if needed)
+    spinner.text = 'Checking portfolio...';
+    const ensurePortfolioIxs = await client.ensurePortfolioInstructions(wallet.publicKey);
+
+    if (ensurePortfolioIxs.length > 0) {
+      spinner.text = 'Creating portfolio (first-time setup)...';
+    }
+
     // Build deposit instruction
     spinner.text = 'Building deposit transaction...';
     const depositIx = client.buildDepositInstruction(
@@ -74,7 +82,9 @@ export async function depositCommand(options: DepositOptions): Promise<void> {
       userTokenAccount
     );
 
-    const transaction = new Transaction().add(depositIx);
+    const transaction = new Transaction()
+      .add(...ensurePortfolioIxs)  // Auto-create portfolio if needed
+      .add(depositIx);
 
     // Send and confirm transaction
     spinner.text = 'Sending transaction...';
