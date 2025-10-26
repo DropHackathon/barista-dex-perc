@@ -321,6 +321,28 @@ const transaction = new Transaction()
 
 **Note:** Portfolio uses `create_with_seed` (NOT PDA) to bypass Solana's 10KB CPI limit, since portfolios are ~136KB.
 
+### v0.5 PnL Settlement Model
+
+**Important:** v0.5 implements real PnL settlement with DLP counterparties:
+
+**Architecture:**
+- Each slab has an `lp_owner` field → DLP's wallet address
+- DLP creates a Portfolio account (same structure as traders)
+- DLP deposits SOL capital to their Portfolio
+- Trades settle with **real SOL transfers** between User Portfolio ↔ DLP Portfolio
+
+**Zero-Sum Model:**
+- User profit = DLP loss (SOL transferred from DLP → User)
+- User loss = DLP profit (SOL transferred from User → DLP)
+- DLP acts as counterparty for all trades on their slab
+
+**Single-Slab Execution (v0.5):**
+- Only 1 slab per trade supported
+- Cross-slab routing disabled (would require splitting PnL across multiple DLP Portfolios)
+- v1 order book will re-enable cross-slab routing
+
+**For DLPs:** See [DLP_LOCALNET_SETUP_GUIDE.md](DLP_LOCALNET_SETUP_GUIDE.md) for capital requirements and setup instructions.
+
 ---
 
 ## Testing Oracle Integration (Optional)

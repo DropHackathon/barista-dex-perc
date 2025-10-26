@@ -13,7 +13,8 @@
 3. [Phase 3: Network & Discovery](#phase-3-network--discovery)
 4. [Phase 4: Oracle Integration](#phase-4-oracle-integration)
 5. [Phase 5: Leverage Trading](#phase-5-leverage-trading)
-6. [Summary Statistics](#summary-statistics)
+6. [Phase 6: PnL Settlement (v0.5)](#phase-6-pnl-settlement-v05)
+7. [Summary Statistics](#summary-statistics)
 
 ---
 
@@ -2474,6 +2475,310 @@ barista deposit --amount 1000000000
 2. **User questions reveal bugs**: "Why do we have --mint?" uncovered fundamental mismatch
 3. **Test with actual deployment**: Type-level correctness doesn't guarantee runtime success
 4. **Document v0 limitations**: Clear messaging about SOL-only prevents user confusion
+
+---
+
+## Phase 6: PnL Settlement (v0.5)
+
+### Goal: Implement Real PnL Settlement with DLP Counterparties
+
+**Problem**: v0 had no real PnL settlement - only virtual accounting. When users closed profitable positions, there was no mechanism to transfer actual SOL from a counterparty.
+
+**Solution**: Implement DLP Portfolio-based settlement where DLPs act as counterparties for all trades on their slabs.
+
+### Architecture Decision: DLP Portfolio = Trader Portfolio
+
+**Key Design Choice**: Use the same Portfolio structure for both traders and DLPs.
+
+**Benefits**:
+1. **Zero migration impact**: v0.5 → v1 order book requires no account changes
+2. **Simple implementation**: Reuse existing Portfolio struct and PDA derivation
+3. **Same infrastructure**: DLPs use trader CLI commands (deposit, portfolio, withdraw)
+4. **Future-proof**: v0.5 tracks counterparty PnL, v1 will track LP inventory PnL (same account)
+
+**Trade-offs Considered**:
+- ✅ **Chosen**: Portfolio-to-Portfolio (simple, reusable, v1-compatible)
+- ❌ **Rejected**: Vault-based (wrong architecture - Vault is for SPL tokens, not SOL)
+- ❌ **Rejected**: Cross-slab routing (too complex - requires splitting PnL across multiple DLP Portfolios)
+
+### Implementation Details
+
+#### Router Program Changes
+
+**File**: `programs/router/src/entrypoint.rs`
+
+**Account Layout Update** (execute_cross_slab):
+```rust
+// BEFORE (v0 - No Settlement)
+// 0. user_portfolio
+// 1. user_authority
+// 2. vault              ← REMOVED (not needed for SOL)
+// 3. registry
+// 4. router_authority
+// 5+ slabs, receipts, oracles
+
+// AFTER (v0.5 - Real Settlement)
+// 0. user_portfolio
+// 1. user_authority
+// 2. dlp_portfolio      ← NEW: Counterparty
+// 3. registry
+// 4. router_authority
+// 5. system_program     ← NEW: For SOL transfers
+// 6+ slabs, receipts, oracles
+```
+
+**File**: `programs/router/src/instructions/execute_cross_slab.rs`
+
+**Settlement Logic**:
+```rust
+fn settle_pnl(
+    user_portfolio_account: &AccountInfo,
+    user_portfolio: &mut Portfolio,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
+    system_program: &AccountInfo,
+    realized_pnl: i128,
+) -> Result<(), PercolatorError> {
+    // Update accounting
+    user_portfolio.pnl += realized_pnl;
+    dlp_portfolio.pnl -= realized_pnl;
+
+    // Real SOL transfer via System Program CPI
+    if realized_pnl > 0 {
+        // User won → DLP pays
+        transfer_sol(dlp → user)
+    } else {
+        // User lost → User pays DLP
+        transfer_sol(user → dlp)
+    }
+}
+```
+
+**Single-Slab Enforcement**:
+```rust
+// v0.5 Limitation: Only single slab execution
+if slab_accounts.len() != 1 {
+    msg!("Error: v0 only supports single slab execution");
+    return Err(PercolatorError::InvalidInstruction);
+}
+```
+
+#### SDK Changes
+
+**File**: `sdk/src/clients/RouterClient.ts`
+
+**New Method**: `getDlpOwnerForSlab()`
+```typescript
+async getDlpOwnerForSlab(slabMarket: PublicKey): Promise<PublicKey | null> {
+  const accountInfo = await this.connection.getAccountInfo(slabMarket);
+  // Slab header layout: discriminator(8) + lp_owner(32) + ...
+  const lpOwnerBytes = accountInfo.data.slice(8, 40);
+  return new PublicKey(lpOwnerBytes);
+}
+```
+
+**Updated Method**: `buildExecuteCrossSlabInstruction()`
+```typescript
+buildExecuteCrossSlabInstruction(
+  user: PublicKey,
+  splits: SlabSplit[],
+  orderType: ExecutionType = ExecutionType.Limit
+): TransactionInstruction {
+  // v0.5: Single slab only
+  if (splits.length !== 1) {
+    throw new Error('v0.5 only supports single slab execution');
+  }
+
+  // Derive DLP Portfolio from slab.lp_owner
+  const [dlpPortfolioPDA] = this.derivePortfolioPDA(splits[0].dlpOwner);
+
+  // Build account list
+  const keys = [
+    { pubkey: userPortfolioPDA, isSigner: false, isWritable: true },
+    { pubkey: user, isSigner: true, isWritable: false },
+    { pubkey: dlpPortfolioPDA, isSigner: false, isWritable: true },  // NEW
+    { pubkey: registryPDA, isSigner: false, isWritable: true },
+    { pubkey: authorityPDA, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },  // NEW
+    // ... slabs, receipts, oracles
+  ];
+}
+```
+
+**Auto-Fetch in Buy/Sell**:
+```typescript
+async buildBuyInstruction(...) {
+  const oracleAccount = await this.getOracleForSlab(slabMarket);
+  const dlpOwner = await this.getDlpOwnerForSlab(slabMarket);  // NEW
+
+  const split: SlabSplit = {
+    slabMarket,
+    side: 0,
+    qty: quantity,
+    limitPx: limitPrice,
+    oracle: oracleAccount,
+    dlpOwner,  // NEW: Required for v0.5
+  };
+}
+```
+
+**Type Update**: `sdk/src/types/router.ts`
+```typescript
+export interface SlabSplit {
+  slabMarket: PublicKey;
+  side: number;
+  qty: BN;
+  limitPx: BN;
+  oracle: PublicKey;
+  dlpOwner?: PublicKey;  // NEW: Required for v0.5 PnL settlement
+}
+```
+
+#### CLI Changes
+
+**No changes needed** - CLI uses SDK methods which now auto-fetch DLP owner.
+
+#### Documentation Updates
+
+**Files Modified**:
+- `thoughts/DLP_LOCALNET_SETUP_GUIDE.md` - Updated for v0.5 counterparty model
+- `thoughts/LOCALNET_DEPLOYMENT_GUIDE.md` - Added PnL settlement section
+- `cli-client/src/index.ts` - Updated v0 limitations help text
+
+**Key DLP Documentation**:
+- Capital requirements: Min 10 SOL, recommended 100+ SOL
+- Setup: Portfolio auto-created on first deposit
+- Risk: Zero-sum game - DLP takes opposite side of all trader positions
+- Commands: Same as traders (deposit, portfolio, withdraw)
+
+### Zero-Sum Settlement Model
+
+**Trader Profit Example**:
+1. Trader opens long position at $100, closes at $110 → +$10 profit
+2. Router calculates: `realized_pnl = +10 (in lamports)`
+3. Settlement executes:
+   - `user_portfolio.pnl += 10`
+   - `dlp_portfolio.pnl -= 10`
+   - Transfer 10 SOL: DLP Portfolio → User Portfolio (via System Program CPI)
+
+**Trader Loss Example**:
+1. Trader opens long position at $100, closes at $90 → -$10 loss
+2. Router calculates: `realized_pnl = -10`
+3. Settlement executes:
+   - `user_portfolio.pnl -= 10`
+   - `dlp_portfolio.pnl += 10`
+   - Transfer 10 SOL: User Portfolio → DLP Portfolio
+
+### Single-Slab Limitation (v0.5)
+
+**Why cross-slab routing is disabled**:
+
+**Problem**: Each slab has a different `lp_owner` (different DLP Portfolio).
+
+**Example**:
+- Route $100 trade across 2 slabs: SlabA ($60) + SlabB ($40)
+- SlabA.lp_owner = DLP_A
+- SlabB.lp_owner = DLP_B
+- Realized PnL = +$10
+
+**Question**: Who pays the $10?
+- DLP_A pays $6? DLP_B pays $4? (Pro-rata by split)
+- Both pay $10? (Overpayment)
+- First slab pays all? (Unfair)
+
+**Solution for v0.5**: Enforce single-slab execution → single DLP counterparty → simple settlement.
+
+**v1 Order Book**: Cross-slab routing re-enabled because PnL comes from matched orders (traders vs traders), not DLP Portfolios.
+
+### Migration Path to v1
+
+**Zero Breaking Changes**:
+
+**v0.5 (Counterparty Model)**:
+- DLP creates Portfolio
+- Portfolio.pnl = Net counterparty PnL
+- Settlement: User ↔ DLP Portfolio
+
+**v1 (Order Book Model)**:
+- Same DLP Portfolio account
+- Portfolio.pnl = LP inventory PnL (mark-to-market on LP positions)
+- Settlement: User ↔ Matched traders (via order book)
+
+**Key Insight**: Portfolio serves dual purpose:
+1. v0.5: Tracks DLP's counterparty exposure
+2. v1: Tracks DLP's LP inventory exposure
+
+Same account, same fields, different usage pattern.
+
+### Files Modified
+
+**Router Program**:
+- `programs/router/src/entrypoint.rs` - Account layout update
+- `programs/router/src/instructions/execute_cross_slab.rs` - Settlement implementation
+
+**SDK**:
+- `sdk/src/clients/RouterClient.ts` - DLP lookup + instruction building
+- `sdk/src/types/router.ts` - SlabSplit type update
+
+**CLI**:
+- `cli-client/src/index.ts` - Help text update
+
+**Documentation**:
+- `thoughts/DLP_LOCALNET_SETUP_GUIDE.md` - Complete rewrite for v0.5
+- `thoughts/LOCALNET_DEPLOYMENT_GUIDE.md` - Added PnL section
+- `thoughts/PROJECT_DEVELOPMENT_HISTORY.md` - This phase
+- `thoughts/V1_ROADMAP.md` - Updated settlement migration notes
+
+### Impact Summary
+
+**Breaking Changes**:
+- ❌ Cross-slab routing disabled (v0.5 limitation)
+- ❌ `--slab` flag now required in buy/sell commands
+- ❌ Vault account removed from execute_cross_slab
+
+**New Capabilities**:
+- ✅ Real PnL settlement with SOL transfers
+- ✅ DLP counterparty model functional
+- ✅ DLPs can use trader CLI for portfolio management
+- ✅ Zero-sum profit/loss settlement working
+- ✅ Single-slab execution enforced
+
+**User Experience**:
+
+**DLP Setup (v0.5)**:
+```bash
+# Create DLP Portfolio + deposit capital (auto-created)
+barista deposit --amount 100000000000 --keypair ~/.config/solana/dlp-wallet.json
+
+# Create slab (links to DLP via lp_owner)
+percolator-keeper slab create --lp-owner <DLP_PUBKEY> ...
+
+# Monitor DLP exposure
+barista portfolio --keypair ~/.config/solana/dlp-wallet.json
+# Shows:
+#   Principal: 100 SOL
+#   PnL: -5 SOL (if traders are winning)
+#   Equity: 95 SOL
+```
+
+**Trader Flow (No Changes)**:
+```bash
+# Traders don't need to know about DLP settlement
+barista buy --slab <SLAB> -q 1000
+# Behind the scenes:
+# 1. SDK fetches slab.lp_owner → DLP address
+# 2. Derives DLP Portfolio PDA
+# 3. Passes DLP Portfolio to router instruction
+# 4. Settlement transfers SOL between portfolios
+```
+
+### Technical Lessons
+
+1. **Architecture Reuse**: Same Portfolio for traders + DLPs = massive simplification
+2. **Future-Proofing**: Design v0.5 with v1 migration in mind = zero breaking changes
+3. **Constraint Propagation**: Single-slab limitation in v0.5 → cleaner architecture
+4. **Auto-Fetching**: SDK hides complexity (DLP lookup, oracle lookup) from CLI users
+5. **Zero-Sum Validation**: User profit = DLP loss (verified in formal model)
 
 ---
 
