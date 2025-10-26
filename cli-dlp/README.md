@@ -11,6 +11,7 @@ Command-line interface for **Decentralized Liquidity Providers (DLPs)** on Baris
 
 - 🏦 **Portfolio Management** - Initialize, deposit, withdraw, and view DLP capital
 - 📊 **Slab Operations** - Create and view order book slabs
+- 🔮 **Oracle Management** - Initialize and update price oracles for instruments
 - 🔒 **Safety Checks** - Automatic validation to prevent unsafe operations
 - 🎨 **Beautiful Output** - Color-coded displays with real-time spinners
 - 💬 **Interactive Prompts** - Guided parameter collection and confirmations
@@ -98,6 +99,7 @@ Set these to avoid passing options every time:
 export BARISTA_DLP_KEYPAIR=~/.config/solana/dlp-wallet.json
 export BARISTA_DLP_NETWORK=localnet
 export BARISTA_DLP_RPC_URL=http://127.0.0.1:8899  # Optional custom RPC
+export BARISTA_ORACLE_PROGRAM_ID=<oracle-program-id>  # Optional, for oracle commands
 
 # Now you can omit --keypair and --network flags
 barista-dlp portfolio
@@ -309,6 +311,128 @@ barista-dlp slab:view --address <slab-pubkey> --detailed
 │ Bump                 │ 255                            │
 └──────────────────────┴────────────────────────────────┘
 ```
+
+### Oracle Commands
+
+#### `oracle:init`
+Initialize a new price oracle for an instrument.
+
+```bash
+barista-dlp oracle:init \
+  --instrument <instrument-address> \
+  --initial-price 50000.00 \
+  --oracle-program <oracle-program-id>
+```
+
+**Options:**
+- `--instrument <address>` - Instrument address (required)
+- `--initial-price <price>` - Initial price in USD (e.g., 50000.00)
+- `--oracle-program <address>` - Oracle program ID (or set `BARISTA_ORACLE_PROGRAM_ID`)
+- `--yes` - Skip confirmation prompts
+- `--keypair <path>` - Path to DLP wallet keypair
+- `--network <network>` - Network to use
+
+**Interactive Mode:**
+```bash
+barista-dlp oracle:init
+
+? Oracle program ID: <paste-program-id>
+? Instrument address: <paste-instrument-id>
+? Initial price in USD (e.g., 50000.00): 50000.00
+? Initialize this oracle? Yes
+
+✓ Oracle initialized successfully!
+  Oracle Address: 8xR4tP...nZk3vL
+  Transaction: 3jD9qX...mYr8K
+
+⚠ Save the oracle address!
+Traders will need this address to verify prices.
+```
+
+**Notes:**
+- Oracle PDA is derived from: `['oracle', instrument]`
+- Only one oracle per instrument
+- You become the authority (can update prices)
+
+#### `oracle:view`
+View oracle details and current price.
+
+```bash
+barista-dlp oracle:view --address <oracle-address>
+```
+
+**Options:**
+- `--address <pubkey>` - Oracle address (required)
+- `--keypair <path>` - Path to DLP wallet (to check authority)
+- `--network <network>` - Network to use
+
+**Example Output:**
+```
+═══════════════════════════════════════
+        Oracle Information
+═══════════════════════════════════════
+
+┌─────────────────────┬──────────────────────────────┐
+│ Field               │ Value                        │
+├─────────────────────┼──────────────────────────────┤
+│ Oracle Address      │ 8xR4tP...nZk3vL              │
+│ Authority           │ 9aE2FN...Lp4k2               │
+│ Instrument          │ BTC...PERP1                  │
+│                     │                              │
+│ Current Price       │ $50,000.00                   │
+│ Confidence Interval │ ±$0.00                       │
+│ Last Updated        │ 2025-10-26T10:30:45.000Z     │
+│ Price Age           │ 2m ago                       │
+│                     │                              │
+│ Version             │ 0                            │
+│ Bump                │ 255                          │
+│                     │ ✓ You are the authority      │
+└─────────────────────┴──────────────────────────────┘
+```
+
+**Staleness Warning:**
+If price hasn't been updated in 5+ minutes, you'll see:
+```
+⚠ Warning: Price is stale (10m ago). Consider updating.
+```
+
+#### `oracle:update`
+Update oracle price.
+
+```bash
+barista-dlp oracle:update \
+  --address <oracle-address> \
+  --price 51000.00 \
+  --confidence 100.00
+```
+
+**Options:**
+- `--address <pubkey>` - Oracle address (required)
+- `--price <price>` - New price in USD (e.g., 51000.00)
+- `--confidence <amount>` - Confidence interval in USD (e.g., 100.00)
+- `--oracle-program <address>` - Oracle program ID (or set `BARISTA_ORACLE_PROGRAM_ID`)
+- `--yes` - Skip confirmation prompts
+- `--keypair <path>` - Path to DLP wallet keypair
+- `--network <network>` - Network to use
+
+**Interactive Mode:**
+```bash
+barista-dlp oracle:update --address <oracle-address>
+
+? New price in USD (e.g., 51000.00): 51000.00
+? Confidence interval in USD (e.g., 100.00): 0.00
+? Update oracle price? Yes
+
+✓ Oracle price updated successfully!
+  New Price:    $51,000.00
+  Confidence:   ±$0.00
+  Transaction:  4kE8pN...qRt5M
+```
+
+**Notes:**
+- Only the authority can update the oracle
+- Price and confidence are scaled by 1,000,000 internally
+- Updates include automatic timestamp
 
 #### `slab:update` (Coming Soon)
 Update slab parameters (fees, limits, etc.).

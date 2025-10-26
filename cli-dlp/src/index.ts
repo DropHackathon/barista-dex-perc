@@ -7,6 +7,9 @@ import { depositCommand } from './commands/portfolio/deposit';
 import { withdrawCommand } from './commands/portfolio/withdraw';
 import { createSlabCommand } from './commands/slab/create';
 import { viewSlabCommand } from './commands/slab/view';
+import { initOracleCommand } from './commands/oracle/init';
+import { viewOracleCommand } from './commands/oracle/view';
+import { updateOracleCommand } from './commands/oracle/update';
 import chalk from 'chalk';
 
 const program = new Command();
@@ -69,6 +72,32 @@ program
   .option('--detailed', 'Show detailed information')
   .action(viewSlabCommand);
 
+// Oracle commands
+program
+  .command('oracle:init')
+  .description('Initialize a new price oracle')
+  .option('--instrument <address>', 'Instrument address')
+  .option('--initial-price <price>', 'Initial price in USD (e.g., 50000.00)')
+  .option('--oracle-program <address>', 'Oracle program ID')
+  .option('--yes', 'Skip confirmation prompts')
+  .action(initOracleCommand);
+
+program
+  .command('oracle:view')
+  .description('View oracle details')
+  .requiredOption('--address <pubkey>', 'Oracle address')
+  .action(viewOracleCommand);
+
+program
+  .command('oracle:update')
+  .description('Update oracle price')
+  .requiredOption('--address <pubkey>', 'Oracle address')
+  .option('--price <price>', 'New price in USD (e.g., 51000.00)')
+  .option('--confidence <amount>', 'Confidence interval in USD (e.g., 100.00)')
+  .option('--oracle-program <address>', 'Oracle program ID')
+  .option('--yes', 'Skip confirmation prompts')
+  .action(updateOracleCommand);
+
 // Add welcome message for no args
 if (process.argv.length === 2) {
   console.log(chalk.bold('\n🏪 Barista DEX - DLP CLI\n'));
@@ -82,6 +111,9 @@ if (process.argv.length === 2) {
   console.log('  withdraw         Withdraw SOL');
   console.log('  slab:create      Create a new slab');
   console.log('  slab:view        View slab details');
+  console.log('  oracle:init      Initialize price oracle');
+  console.log('  oracle:view      View oracle details');
+  console.log('  oracle:update    Update oracle price');
   console.log('\nFor help:');
   console.log('  barista-dlp --help');
   console.log('  barista-dlp <command> --help\n');

@@ -286,40 +286,39 @@ barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
 ### 4.6: Initialize Oracle
 
 ```bash
-# Create oracle for the instrument
-cd ../scripts
+# Set oracle program ID for convenience
+export BARISTA_ORACLE_PROGRAM_ID=<ORACLE_PROGRAM_ID>
 
-# Create oracle initialization script
-cat > init-oracle.ts << 'EOF'
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
-import { readFileSync } from 'fs';
+# Initialize oracle for the instrument
+barista-dlp oracle:init \
+  --instrument <INSTRUMENT_ID> \
+  --initial-price 50000.00
 
-async function main() {
-  const connection = new Connection('http://localhost:8899', 'confirmed');
-  const dlpKeypair = Keypair.fromSecretKey(
-    new Uint8Array(JSON.parse(readFileSync(process.env.HOME + '/.config/solana/dlp-wallet.json', 'utf-8')))
-  );
+# Or use interactive mode:
+barista-dlp oracle:init
 
-  const oracleProgramId = new PublicKey('<ORACLE_PROGRAM_ID>');
-  const instrumentId = new PublicKey('<INSTRUMENT_ID>');
-
-  // Derive oracle PDA
-  const [oraclePDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('oracle'), instrumentId.toBuffer()],
-    oracleProgramId
-  );
-
-  console.log('Oracle PDA:', oraclePDA.toBase58());
-  console.log('\nUse this oracle address for trading!');
-}
-
-main();
-EOF
-
-# Run the script
-npx ts-node init-oracle.ts
+# Expected output:
+# ═══════════════════════════════════════
+#        Oracle Initialization
+# ═══════════════════════════════════════
+# Oracle PDA:        8xR4tP...nZk3vL
+# Instrument:        BTC...PERP1
+# Initial Price:     $50,000.00
+# Authority:         <DLP_PUBKEY>
+# Bump:              255
+# ═══════════════════════════════════════
+#
+# ✓ Oracle initialized successfully!
+#   Oracle Address: 8xR4tP...nZk3vL
+#   Transaction: 3jD9qX...mYr8K
+#
+# ⚠ Save the oracle address!
+# Traders will need this address to verify prices.
 
 # Save the oracle address: <ORACLE_ADDRESS>
+
+# Verify oracle
+barista-dlp oracle:view --address <ORACLE_ADDRESS>
 ```
 
 **Your DLP setup is complete!** You now have:
@@ -627,9 +626,20 @@ barista-dlp slab:create \
 Update oracle prices to simulate market movements:
 
 ```bash
-# Update oracle to $52,000 (requires oracle update authority)
-# Implementation depends on oracle program design
-# See oracle program documentation for update instructions
+# Update oracle to $52,000 (as the DLP/authority)
+barista-dlp oracle:update \
+  --address <ORACLE_ADDRESS> \
+  --price 52000.00 \
+  --confidence 0.00
+
+# Expected output:
+# ✓ Oracle price updated successfully!
+#   New Price:    $52,000.00
+#   Confidence:   ±$0.00
+#   Transaction:  4kE8pN...qRt5M
+
+# Verify update
+barista-dlp oracle:view --address <ORACLE_ADDRESS>
 ```
 
 ---
