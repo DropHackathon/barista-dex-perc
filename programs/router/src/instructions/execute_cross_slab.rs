@@ -1,6 +1,6 @@
 //! Execute cross-slab order - v0 main instruction
 
-use crate::state::{Portfolio, Vault, SlabRegistry};
+use crate::state::{Portfolio, SlabRegistry};
 use crate::oracle::{OracleAdapter, CustomAdapter, PythAdapter};
 use percolator_common::*;
 use pinocchio::{account_info::AccountInfo, msg, pubkey::Pubkey};
@@ -117,11 +117,14 @@ pub struct SlabSplit {
 /// and updates portfolio with net exposure.
 ///
 /// # Arguments
-/// * `portfolio` - User's portfolio account
+/// * `user_portfolio_account` - User's portfolio account (holds SOL)
+/// * `user_portfolio` - User's portfolio state
 /// * `user` - User pubkey (signer)
-/// * `vault` - Collateral vault
+/// * `dlp_portfolio_account` - DLP's portfolio account (counterparty, holds SOL)
+/// * `dlp_portfolio` - DLP's portfolio state
 /// * `registry` - Slab registry with insurance state
 /// * `router_authority` - Router authority PDA (for CPI signing)
+/// * `system_program` - System program for SOL transfers
 /// * `slab_accounts` - Array of slab accounts to execute on
 /// * `receipt_accounts` - Array of receipt PDAs (one per slab)
 /// * `oracle_accounts` - Array of oracle price feed accounts (one per slab)
@@ -130,23 +133,27 @@ pub struct SlabSplit {
 ///
 /// # Returns
 /// * Updates portfolio with net exposures
+/// * Settles PnL via SOL transfer between user and DLP portfolios
 /// * Accrues insurance fees from taker fills
 /// * Checks margin on net exposure (capital efficiency!)
 /// * All-or-nothing atomicity
 pub fn process_execute_cross_slab(
-    portfolio: &mut Portfolio,
+    user_portfolio_account: &AccountInfo,
+    user_portfolio: &mut Portfolio,
     user: &Pubkey,
-    vault: &mut Vault,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
     registry: &mut SlabRegistry,
     router_authority: &AccountInfo,
+    system_program: &AccountInfo,
     slab_accounts: &[AccountInfo],
     receipt_accounts: &[AccountInfo],
     oracle_accounts: &[AccountInfo],
     splits: &[SlabSplit],
     order_type: u8, // 0 = Market, 1 = Limit
 ) -> Result<(), PercolatorError> {
-    // Verify portfolio belongs to user
-    if &portfolio.user != user {
+    // Verify user portfolio belongs to user
+    if &user_portfolio.user != user {
         msg!("Error: Portfolio does not belong to user");
         return Err(PercolatorError::InvalidPortfolio);
     }
@@ -156,14 +163,14 @@ pub fn process_execute_cross_slab(
     use pinocchio::sysvars::{clock::Clock, Sysvar};
     let current_slot = Clock::get()
         .map(|clock| clock.slot)
-        .unwrap_or(portfolio.last_slot);
+        .unwrap_or(user_portfolio.last_slot);
 
     on_user_touch(
-        portfolio.principal,
-        &mut portfolio.pnl,
-        &mut portfolio.vested_pnl,
-        &mut portfolio.last_slot,
-        &mut portfolio.pnl_index_checkpoint,
+        user_portfolio.principal,
+        &mut user_portfolio.pnl,
+        &mut user_portfolio.vested_pnl,
+        &mut user_portfolio.last_slot,
+        &mut user_portfolio.pnl_index_checkpoint,
         &registry.global_haircut,
         &registry.pnl_vesting_params,
         current_slot,
@@ -192,7 +199,7 @@ pub fn process_execute_cross_slab(
 
     // Verify router_authority is the correct PDA
     use crate::pda::derive_authority_pda;
-    let (expected_authority, authority_bump) = derive_authority_pda(&portfolio.router_id);
+    let (expected_authority, authority_bump) = derive_authority_pda(&user_portfolio.router_id);
     if router_authority.key() != &expected_authority {
         msg!("Error: Invalid router authority PDA");
         return Err(PercolatorError::InvalidAccount);
@@ -332,7 +339,7 @@ pub fn process_execute_cross_slab(
         let instrument_idx = 0u16;
 
         // Get current exposure
-        let current_exposure = portfolio.get_exposure(slab_idx, instrument_idx);
+        let current_exposure = user_portfolio.get_exposure(slab_idx, instrument_idx);
 
         // Calculate realized PnL if reducing position
         let realized_pnl = calculate_realized_pnl(
@@ -354,11 +361,18 @@ pub fn process_execute_cross_slab(
             current_exposure - filled_qty
         };
 
-        portfolio.update_exposure(slab_idx, instrument_idx, new_exposure);
+        user_portfolio.update_exposure(slab_idx, instrument_idx, new_exposure);
     }
 
-    // Settle PnL between user and vault (counterparty)
-    settle_pnl(portfolio, vault, total_realized_pnl)?;
+    // Settle PnL between user and DLP via SOL transfer
+    settle_pnl(
+        user_portfolio_account,
+        user_portfolio,
+        dlp_portfolio_account,
+        dlp_portfolio,
+        system_program,
+        total_realized_pnl,
+    )?;
 
     // Phase 3.5: Accrue insurance fees from taker fills
     // Calculate total notional across all splits and accrue insurance
@@ -384,16 +398,16 @@ pub fn process_execute_cross_slab(
     // For v0, use simplified margin calculation:
     // - Calculate net exposure across all slabs for same instrument
     // - IM = abs(net_exposure) * notional_value * imr_factor
-    let net_exposure = calculate_net_exposure(portfolio);
+    let net_exposure = calculate_net_exposure(user_portfolio);
     let im_required = calculate_initial_margin(net_exposure, splits);
 
     msg!("Calculated margin on net exposure");
 
-    portfolio.update_margin(im_required, im_required / 2); // MM = IM / 2 for v0
+    user_portfolio.update_margin(im_required, im_required / 2); // MM = IM / 2 for v0
 
     // Phase 5: Check if portfolio has sufficient margin
     // Equity now includes realized PnL from this trade
-    if !portfolio.has_sufficient_margin() {
+    if !user_portfolio.has_sufficient_margin() {
         msg!("Error: Insufficient margin");
         return Err(PercolatorError::PortfolioInsufficientMargin);
     }
@@ -469,41 +483,114 @@ fn calculate_realized_pnl(
     pnl
 }
 
-/// Settle PnL between user portfolio and LP vault (counterparty)
+/// Settle PnL between user and DLP portfolios (counterparty)
 ///
-/// In v0, LP vault acts as counterparty for all trades:
-/// - User gains (+PnL) → User portfolio.pnl increases, LP vault.balance decreases (LP loses)
-/// - User loses (-PnL) → User portfolio.pnl decreases, LP vault.balance increases (LP gains)
+/// In v0 SOL-margined trading, DLP portfolio acts as counterparty:
+/// - User gains (+PnL) → Transfer SOL from DLP Portfolio to User Portfolio
+/// - User loses (-PnL) → Transfer SOL from User Portfolio to DLP Portfolio
 ///
-/// Note: This differs from the formal model's "vault" which represents total system funds.
-/// Here, "vault" is the LP's capital that backs trades (zero-sum counterparty).
+/// Both portfolios hold actual SOL lamports, so we do real System Program transfers.
 fn settle_pnl(
-    portfolio: &mut Portfolio,
-    vault: &mut Vault,
+    user_portfolio_account: &AccountInfo,
+    user_portfolio: &mut Portfolio,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
+    system_program: &AccountInfo,
     realized_pnl: i128,
 ) -> Result<(), PercolatorError> {
     if realized_pnl == 0 {
         return Ok(());
     }
 
-    // Update user's PnL ledger
-    portfolio.pnl = portfolio.pnl.saturating_add(realized_pnl);
+    // Update PnL accounting for both parties
+    user_portfolio.pnl = user_portfolio.pnl.saturating_add(realized_pnl);
+    dlp_portfolio.pnl = dlp_portfolio.pnl.saturating_sub(realized_pnl);
 
-    // Update LP vault balance (counterparty - zero-sum)
+    // Perform actual SOL transfer
     if realized_pnl > 0 {
-        // User won → LP loses (vault balance decreases)
-        let profit = realized_pnl as u128;
-        if vault.balance < profit {
-            msg!("Error: LP vault insufficient funds to cover user profit");
+        // User won → Transfer SOL from DLP to User
+        let profit = realized_pnl as u64;
+
+        // Check DLP has sufficient lamports
+        if dlp_portfolio_account.lamports() < profit {
+            msg!("Error: DLP portfolio insufficient SOL to cover user profit");
             return Err(PercolatorError::InsufficientFunds);
         }
-        vault.balance = vault.balance.saturating_sub(profit);
-        msg!("User profit settled from LP vault");
+
+        // Build System Program transfer instruction
+        let mut instruction_data = [0u8; 12];
+        instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
+        instruction_data[4..12].copy_from_slice(&profit.to_le_bytes()); // Amount
+
+        use pinocchio::instruction::{AccountMeta, Instruction};
+        use pinocchio::program::invoke;
+
+        let transfer_instruction = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta {
+                    pubkey: dlp_portfolio_account.key(),
+                    is_signer: false,
+                    is_writable: true,
+                },
+                AccountMeta {
+                    pubkey: user_portfolio_account.key(),
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            data: &instruction_data,
+        };
+
+        invoke(
+            &transfer_instruction,
+            &[dlp_portfolio_account, user_portfolio_account, system_program],
+        )
+        .map_err(|_| PercolatorError::InsufficientFunds)?;
+
+        msg!("User profit transferred from DLP portfolio");
     } else {
-        // User lost → LP gains (vault balance increases)
-        let loss = (-realized_pnl) as u128;
-        vault.balance = vault.balance.saturating_add(loss);
-        msg!("User loss settled to LP vault");
+        // User lost → Transfer SOL from User to DLP
+        let loss = (-realized_pnl) as u64;
+
+        // Check user has sufficient lamports
+        if user_portfolio_account.lamports() < loss {
+            msg!("Error: User portfolio insufficient SOL to cover loss");
+            return Err(PercolatorError::InsufficientFunds);
+        }
+
+        // Build System Program transfer instruction
+        let mut instruction_data = [0u8; 12];
+        instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
+        instruction_data[4..12].copy_from_slice(&loss.to_le_bytes()); // Amount
+
+        use pinocchio::instruction::{AccountMeta, Instruction};
+        use pinocchio::program::invoke;
+
+        let transfer_instruction = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta {
+                    pubkey: user_portfolio_account.key(),
+                    is_signer: false,
+                    is_writable: true,
+                },
+                AccountMeta {
+                    pubkey: dlp_portfolio_account.key(),
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            data: &instruction_data,
+        };
+
+        invoke(
+            &transfer_instruction,
+            &[user_portfolio_account, dlp_portfolio_account, system_program],
+        )
+        .map_err(|_| PercolatorError::InsufficientFunds)?;
+
+        msg!("User loss transferred to DLP portfolio");
     }
 
     Ok(())

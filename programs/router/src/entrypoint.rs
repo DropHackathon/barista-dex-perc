@@ -243,49 +243,53 @@ fn process_initialize_portfolio_inner(program_id: &Pubkey, accounts: &[AccountIn
     Ok(())
 }
 
-/// Process execute cross-slab instruction (v0 main instruction)
+/// Process execute cross-slab instruction (v0.5 with PnL settlement)
 ///
 /// Expected accounts:
-/// 0. `[writable]` Portfolio account
+/// 0. `[writable]` User Portfolio account
 /// 1. `[signer]` User authority
-/// 2. `[writable]` Vault account
+/// 2. `[writable]` DLP Portfolio account (counterparty - looked up from slab.lp_owner)
 /// 3. `[writable]` Registry account
 /// 4. `[]` Router authority PDA
-/// 5..5+N. `[writable]` Slab accounts (N = num_splits)
-/// 5+N..5+2N. `[writable]` Receipt PDAs (N = num_splits)
+/// 5. `[]` System program (for SOL transfers)
+/// 6..6+N. `[writable]` Slab accounts (N = num_splits)
+/// 6+N..6+2N. `[writable]` Receipt PDAs (N = num_splits)
+/// 6+2N..6+3N. `[]` Oracle accounts (N = num_splits)
 ///
 /// Instruction data layout:
 /// - num_splits: u8 (1 byte)
+/// - order_type: u8 (0 = market, 1 = limit)
 /// - For each split (17 bytes):
 ///   - side: u8 (0 = buy, 1 = sell)
 ///   - qty: i64 (quantity in 1e6 scale)
 ///   - limit_px: i64 (limit price in 1e6 scale)
 ///
-/// Total size: 1 + (17 * num_splits) bytes
-/// Maximum splits: 8 (to avoid stack overflow)
+/// Total size: 2 + (17 * num_splits) bytes
+/// Maximum splits: 8 (to avoid stack overflow, v0.5: only 1 slab supported)
 fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 5 {
-        msg!("Error: ExecuteCrossSlab requires at least 5 accounts");
+    if accounts.len() < 6 {
+        msg!("Error: ExecuteCrossSlab requires at least 6 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
-    let portfolio_account = &accounts[0];
+    let user_portfolio_account = &accounts[0];
     let user_account = &accounts[1];
-    let vault_account = &accounts[2];
+    let dlp_portfolio_account = &accounts[2];
     let registry_account = &accounts[3];
     let router_authority = &accounts[4];
+    let system_program = &accounts[5];
 
     // Validate accounts
-    validate_owner(portfolio_account, program_id)?;
-    validate_writable(portfolio_account)?;
-    validate_owner(vault_account, program_id)?;
-    validate_writable(vault_account)?;
+    validate_owner(user_portfolio_account, program_id)?;
+    validate_writable(user_portfolio_account)?;
+    validate_owner(dlp_portfolio_account, program_id)?;
+    validate_writable(dlp_portfolio_account)?;
     validate_owner(registry_account, program_id)?;
     validate_writable(registry_account)?;
 
     // Borrow account data mutably
-    let portfolio = unsafe { borrow_account_data_mut::<Portfolio>(portfolio_account)? };
-    let vault = unsafe { borrow_account_data_mut::<Vault>(vault_account)? };
+    let user_portfolio = unsafe { borrow_account_data_mut::<Portfolio>(user_portfolio_account)? };
+    let dlp_portfolio = unsafe { borrow_account_data_mut::<Portfolio>(dlp_portfolio_account)? };
     let registry = unsafe { borrow_account_data_mut::<SlabRegistry>(registry_account)? };
 
     // Parse instruction data: num_splits (u8) + order_type (u8) + splits (17 bytes each)
@@ -309,17 +313,17 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         return Err(PercolatorError::InvalidOrderType.into());
     }
 
-    // Verify we have enough accounts: 5 base + num_splits slabs + num_splits receipts + num_splits oracles
-    let required_accounts = 5 + (num_splits * 3);
+    // Verify we have enough accounts: 6 base + num_splits slabs + num_splits receipts + num_splits oracles
+    let required_accounts = 6 + (num_splits * 3);
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for ExecuteCrossSlab");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     // Split accounts into slabs, receipts, and oracles
-    let slab_accounts = &accounts[5..5 + num_splits];
-    let receipt_accounts = &accounts[5 + num_splits..5 + num_splits * 2];
-    let oracle_accounts = &accounts[5 + num_splits * 2..5 + num_splits * 3];
+    let slab_accounts = &accounts[6..6 + num_splits];
+    let receipt_accounts = &accounts[6 + num_splits..6 + num_splits * 2];
+    let oracle_accounts = &accounts[6 + num_splits * 2..6 + num_splits * 3];
 
     // Parse splits from instruction data (on stack, small)
     // Use a fixed-size buffer to avoid heap allocation
@@ -361,13 +365,16 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
 
     let splits = &splits_buffer[..num_splits];
 
-    // Call the instruction handler
+    // Call the instruction handler (v0.5 with PnL settlement)
     process_execute_cross_slab(
-        portfolio,
+        user_portfolio_account,
+        user_portfolio,
         user_account.key(),
-        vault,
+        dlp_portfolio_account,
+        dlp_portfolio,
         registry,
         router_authority,
+        system_program,
         slab_accounts,
         receipt_accounts,
         oracle_accounts,
