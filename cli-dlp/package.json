@@ -1,8 +1,9 @@
 {
   "name": "@barista-dex/cli-dlp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI for Barista DEX Liquidity Providers (DLPs)",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "barista-dlp": "./dist/index.js"
   },
@@ -11,7 +12,11 @@
     "dev": "ts-node src/index.ts",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "prepublishOnly": "npm run build && npm test",
+    "prepare": "npm run build",
     "barista-dlp": "ts-node src/index.ts"
   },
   "keywords": [
@@ -19,10 +24,37 @@
     "defi",
     "perpetuals",
     "liquidity-provider",
-    "cli"
+    "cli",
+    "barista-dex",
+    "dlp",
+    "trading",
+    "derivatives",
+    "slab"
   ],
-  "author": "",
+  "author": "Barista DEX",
+  "homepage": "https://github.com/barista-dex/barista-dex#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/barista-dex/barista-dex.git",
+    "directory": "cli-dlp"
+  },
+  "bugs": {
+    "url": "https://github.com/barista-dex/barista-dex/issues"
+  },
   "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "dependencies": {
     "@solana/web3.js": "^1.87.0",
     "@barista-dex/sdk": "workspace:*",

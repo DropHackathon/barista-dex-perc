@@ -4,22 +4,43 @@ Command-line interface for **Decentralized Liquidity Providers (DLPs)** on Baris
 
 > **Note:** This CLI is for DLPs only. If you're a trader, use the [`cli-client`](../cli-client/README.md) CLI instead.
 
+[![npm version](https://img.shields.io/npm/v/@barista-dex/cli-dlp.svg)](https://www.npmjs.com/package/@barista-dex/cli-dlp)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 ## Features
 
 - 🏦 **Portfolio Management** - Initialize, deposit, withdraw, and view DLP capital
-- 📊 **Slab Operations** - Create and manage order book slabs (coming soon)
-- 📈 **Analytics** - Track exposure, PnL, and trading activity (coming soon)
+- 📊 **Slab Operations** - Create and view order book slabs
 - 🔒 **Safety Checks** - Automatic validation to prevent unsafe operations
 - 🎨 **Beautiful Output** - Color-coded displays with real-time spinners
+- 💬 **Interactive Prompts** - Guided parameter collection and confirmations
 
 ## Installation
 
+### From npm (Recommended)
+
 ```bash
-# From workspace root
+# Global installation
+npm install -g @barista-dex/cli-dlp
+
+# Or use npx (no installation required)
+npx @barista-dex/cli-dlp --help
+```
+
+### From Source
+
+```bash
+# Clone repository
+git clone https://github.com/barista-dex/barista-dex.git
+cd barista-dex/cli-dlp
+
+# Install dependencies
 npm install
 
-# Link for global usage (optional)
-cd cli-dlp
+# Build
+npm run build
+
+# Link globally (optional)
 npm link
 ```
 
@@ -470,12 +491,57 @@ cli-dlp/
 - **Trader CLI**: [`cli-client`](../cli-client/README.md) - CLI for traders
 - **Keeper CLI**: [`cli`](../cli/README.md) - Rust-based keeper operations (alternative)
 
+## Publishing
+
+This package is published to npm as `@barista-dex/cli-dlp`.
+
+### For Maintainers
+
+```bash
+# Run tests and build
+npm run prepublishOnly
+
+# Publish to npm (requires npm credentials)
+npm publish
+
+# Or publish with tag
+npm publish --tag beta
+```
+
+**Pre-publish Checklist:**
+- [ ] Update version in `package.json`
+- [ ] Update `CHANGELOG.md` with changes
+- [ ] Run all tests: `npm test`
+- [ ] Build successfully: `npm run build`
+- [ ] Test locally: `npm link && barista-dlp --help`
+- [ ] Create git tag: `git tag cli-dlp-v0.2.0`
+
+## Contributing
+
+Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes
+4. Run tests: `npm test`
+5. Run linter: `npm run lint:fix`
+6. Commit changes: `git commit -m "feat: my feature"`
+7. Push to your fork: `git push origin feature/my-feature`
+8. Open a Pull Request
+
 ## Support
 
 - **Documentation**: [Barista DEX Docs](https://docs.barista.dev)
 - **Issues**: [GitHub Issues](https://github.com/barista-dex/barista-dex/issues)
 - **Discord**: [Join our community](https://discord.gg/barista-dex)
+- **NPM**: [@barista-dex/cli-dlp](https://www.npmjs.com/package/@barista-dex/cli-dlp)
 
 ## License
 
 Apache-2.0
+
+Copyright 2025 Barista DEX Contributors
+
+See [LICENSE](LICENSE) for full details.
