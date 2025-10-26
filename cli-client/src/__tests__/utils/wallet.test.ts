@@ -79,7 +79,7 @@ describe('Wallet Utilities', () => {
 
       expect(config.cluster).toBe('mainnet-beta');
       expect(config.routerProgramId).toBe('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr');
-      expect(config.slabProgramId).toBe('SLaBZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
+      expect(config.slabProgramId).toBe('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
       expect(config.rpcUrl).toBe('https://api.mainnet-beta.solana.com');
     });
 
@@ -88,7 +88,7 @@ describe('Wallet Utilities', () => {
 
       expect(config.cluster).toBe('devnet');
       expect(config.routerProgramId).toBe('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr');
-      expect(config.slabProgramId).toBe('SLaBZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
+      expect(config.slabProgramId).toBe('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
       expect(config.rpcUrl).toBe('https://api.devnet.solana.com');
     });
 
@@ -97,7 +97,7 @@ describe('Wallet Utilities', () => {
 
       expect(config.cluster).toBe('localnet');
       expect(config.routerProgramId).toBe('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr');
-      expect(config.slabProgramId).toBe('SLaBZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
+      expect(config.slabProgramId).toBe('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
       expect(config.rpcUrl).toBe('http://localhost:8899');
     });
 
