@@ -76,5 +76,8 @@ test-ledger/
 # Claude
 thoughts/
 
+# Scripts (local testing only)
+scripts/
+
 # Build artifacts
 target/
