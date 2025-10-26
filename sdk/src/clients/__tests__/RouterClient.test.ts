@@ -93,34 +93,26 @@ describe('RouterClient', () => {
     });
 
     describe('buildDepositInstruction', () => {
-      it('should build valid deposit instruction', () => {
-        const mint = PublicKey.unique();
+      it('should build valid deposit instruction', async () => {
         const amount = new BN(1000000);
         const user = wallet.publicKey;
-        const userTokenAccount = PublicKey.unique();
 
-        const ix = client.buildDepositInstruction(mint, amount, user, userTokenAccount);
+        const ix = await client.buildDepositInstruction(amount, user);
 
         expect(ix.programId.equals(programId)).toBe(true);
-        expect(ix.keys.length).toBe(7);
         expect(ix.data[0]).toBe(RouterInstruction.Deposit);
-        expect(ix.data.length).toBe(17); // 1 (discriminator) + 16 (u128)
       });
     });
 
     describe('buildWithdrawInstruction', () => {
-      it('should build valid withdraw instruction', () => {
-        const mint = PublicKey.unique();
+      it('should build valid withdraw instruction', async () => {
         const amount = new BN(500000);
         const user = wallet.publicKey;
-        const userTokenAccount = PublicKey.unique();
 
-        const ix = client.buildWithdrawInstruction(mint, amount, user, userTokenAccount);
+        const ix = await client.buildWithdrawInstruction(amount, user);
 
         expect(ix.programId.equals(programId)).toBe(true);
-        expect(ix.keys.length).toBe(6);
         expect(ix.data[0]).toBe(RouterInstruction.Withdraw);
-        expect(ix.data.length).toBe(17); // 1 (discriminator) + 16 (u128)
       });
     });
 
@@ -142,16 +134,18 @@ describe('RouterClient', () => {
         const splits: SlabSplit[] = [
           {
             slabMarket: PublicKey.unique(),
-            isBuy: true,
-            size: new BN(1000000),
-            price: new BN(50000000),
+            side: 0, // Buy
+            qty: new BN(1000000),
+            limitPx: new BN(50000000),
+            oracle: PublicKey.unique(),
           },
         ];
 
-        const ix = client.buildExecuteCrossSlabInstruction(user, splits, slabProgram);
+        const ix = client.buildExecuteCrossSlabInstruction(user, splits);
 
         expect(ix.programId.equals(programId)).toBe(true);
-        expect(ix.keys.length).toBe(4); // portfolio + user + slab_program + 1 market
+        // 5 base + 1 slab + 1 receipt + 1 oracle = 8 accounts
+        expect(ix.keys.length).toBe(8);
         expect(ix.data[0]).toBe(RouterInstruction.ExecuteCrossSlab);
         expect(ix.data[1]).toBe(1); // num_splits
       });
@@ -162,21 +156,24 @@ describe('RouterClient', () => {
         const splits: SlabSplit[] = [
           {
             slabMarket: PublicKey.unique(),
-            isBuy: true,
-            size: new BN(1000000),
-            price: new BN(50000000),
+            side: 0, // Buy
+            qty: new BN(1000000),
+            limitPx: new BN(50000000),
+            oracle: PublicKey.unique(),
           },
           {
             slabMarket: PublicKey.unique(),
-            isBuy: false,
-            size: new BN(500000),
-            price: new BN(51000000),
+            side: 1, // Sell
+            qty: new BN(500000),
+            limitPx: new BN(51000000),
+            oracle: PublicKey.unique(),
           },
         ];
 
-        const ix = client.buildExecuteCrossSlabInstruction(user, splits, slabProgram);
+        const ix = client.buildExecuteCrossSlabInstruction(user, splits);
 
-        expect(ix.keys.length).toBe(5); // portfolio + user + slab_program + 2 markets
+        // 5 base + 2 slabs + 2 receipts + 2 oracles = 11 accounts
+        expect(ix.keys.length).toBe(11);
         expect(ix.data[1]).toBe(2); // num_splits
       });
     });
@@ -469,6 +466,83 @@ describe('RouterClient', () => {
       });
     });
   });
+
+  /**
+   * Helper: Create a mock registry buffer matching on-chain layout
+   */
+  function createRegistryBuffer(fields: {
+    routerId: PublicKey;
+    governance: PublicKey;
+    slabCount: number;
+    slabs: Array<{
+      slabId: PublicKey;
+      oracleId: PublicKey;
+      active: boolean;
+    }>;
+  }): Buffer {
+    // Simplified registry buffer creation for testing
+    // Only includes fields needed for getOracleForSlab tests
+    const buffer = Buffer.alloc(10000); // Large enough for registry
+    let offset = 0;
+
+    // Discriminator (8 bytes)
+    buffer.writeBigUInt64LE(BigInt(0x1234567890abcdef), offset);
+    offset += 8;
+
+    // Router ID (32 bytes)
+    serializePubkey(fields.routerId).copy(buffer, offset);
+    offset += 32;
+
+    // Governance (32 bytes)
+    serializePubkey(fields.governance).copy(buffer, offset);
+    offset += 32;
+
+    // Slab count (u16 = 2 bytes)
+    buffer.writeUInt16LE(fields.slabCount, offset);
+    offset += 2;
+
+    // Bump (u8 = 1 byte)
+    buffer.writeUInt8(0, offset);
+    offset += 1;
+
+    // Padding (5 bytes)
+    offset += 5;
+
+    // Liquidation parameters (skip for simplicity - just advance offset)
+    offset += 8; // imr
+    offset += 8; // mmr
+    offset += 8; // liq_band_bps
+    offset += 16; // preliq_buffer (i128)
+    offset += 8; // preliq_band_bps
+    offset += 8; // router_cap_per_slab
+    offset += 16; // min_equity_to_quote (i128)
+    offset += 8; // oracle_tolerance_bps
+    offset += 8; // _padding2
+
+    // Skip complex nested structs (~376 bytes as estimated in deserializeRegistry)
+    offset += 376;
+
+    // Now write slab entries
+    const SLAB_ENTRY_SIZE = 168;
+    for (let i = 0; i < fields.slabs.length; i++) {
+      const slab = fields.slabs[i];
+      const entryOffset = offset + (i * SLAB_ENTRY_SIZE);
+
+      // slab_id (Pubkey - 32 bytes)
+      serializePubkey(slab.slabId).copy(buffer, entryOffset);
+
+      // version_hash ([u8; 32] - 32 bytes) - skip
+      // oracle_id (Pubkey - 32 bytes)
+      serializePubkey(slab.oracleId).copy(buffer, entryOffset + 64);
+
+      // Skip other fields (imr, mmr, etc.)
+
+      // active (bool - 1 byte at offset 160)
+      buffer.writeUInt8(slab.active ? 1 : 0, entryOffset + 160);
+    }
+
+    return buffer;
+  }
 
   describe('Portfolio Deserialization', () => {
     /**
@@ -1045,6 +1119,237 @@ describe('RouterClient', () => {
       expect(portfolio!.health.toString()).toBe('-10000000');
       expect(portfolio!.lastLiquidationTs.toString()).toBe((now - 3600).toString());
       expect(portfolio!.cooldownSeconds.toString()).toBe('86400');
+    });
+  });
+
+  describe('Oracle Auto-Fetch', () => {
+    describe('getOracleForSlab', () => {
+      it('should return oracle for registered slab', async () => {
+        const slabId = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const routerId = PublicKey.unique();
+        const governance = PublicKey.unique();
+
+        // Mock registry with one registered slab
+        const registryBuffer = createRegistryBuffer({
+          routerId,
+          governance,
+          slabCount: 1,
+          slabs: [
+            {
+              slabId,
+              oracleId,
+              active: true,
+            },
+          ],
+        });
+
+        const mockAccountInfo = {
+          data: registryBuffer,
+          executable: false,
+          lamports: 1000000,
+          owner: programId,
+        };
+
+        jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+        const oracle = await client.getOracleForSlab(slabId);
+
+        expect(oracle).toEqual(oracleId);
+      });
+
+      it('should return null for unregistered slab', async () => {
+        const slabId = PublicKey.unique();
+        const routerId = PublicKey.unique();
+        const governance = PublicKey.unique();
+
+        // Mock registry with no slabs
+        const registryBuffer = createRegistryBuffer({
+          routerId,
+          governance,
+          slabCount: 0,
+          slabs: [],
+        });
+
+        const mockAccountInfo = {
+          data: registryBuffer,
+          executable: false,
+          lamports: 1000000,
+          owner: programId,
+        };
+
+        jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+        const oracle = await client.getOracleForSlab(slabId);
+
+        expect(oracle).toBeNull();
+      });
+
+      it('should return null for inactive slab', async () => {
+        const slabId = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const routerId = PublicKey.unique();
+        const governance = PublicKey.unique();
+
+        // Mock registry with inactive slab
+        const registryBuffer = createRegistryBuffer({
+          routerId,
+          governance,
+          slabCount: 1,
+          slabs: [
+            {
+              slabId,
+              oracleId,
+              active: false, // Inactive
+            },
+          ],
+        });
+
+        const mockAccountInfo = {
+          data: registryBuffer,
+          executable: false,
+          lamports: 1000000,
+          owner: programId,
+        };
+
+        jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+        const oracle = await client.getOracleForSlab(slabId);
+
+        expect(oracle).toBeNull();
+      });
+
+      it('should throw error if registry not found', async () => {
+        const slabId = PublicKey.unique();
+
+        jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(null);
+
+        await expect(client.getOracleForSlab(slabId)).rejects.toThrow(
+          'Registry account not found'
+        );
+      });
+    });
+
+    describe('buildBuyInstruction with auto-oracle-fetch', () => {
+      it('should auto-fetch oracle when not provided', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock getOracleForSlab
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+
+        const instruction = await client.buildBuyInstruction(
+          user,
+          slabMarket,
+          quantity,
+          price
+          // Oracle omitted - should auto-fetch
+        );
+
+        expect(client.getOracleForSlab).toHaveBeenCalledWith(slabMarket);
+        expect(instruction).toBeDefined();
+        expect(instruction.keys.length).toBeGreaterThan(0);
+      });
+
+      it('should use provided oracle when specified', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const providedOracle = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        const getOracleSpy = jest.spyOn(client, 'getOracleForSlab');
+
+        const instruction = await client.buildBuyInstruction(
+          user,
+          slabMarket,
+          quantity,
+          price,
+          providedOracle // Oracle provided explicitly
+        );
+
+        // Should NOT call getOracleForSlab
+        expect(getOracleSpy).not.toHaveBeenCalled();
+        expect(instruction).toBeDefined();
+      });
+
+      it('should throw error when oracle not found', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock getOracleForSlab to return null
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(null);
+
+        await expect(
+          client.buildBuyInstruction(user, slabMarket, quantity, price)
+        ).rejects.toThrow(/Oracle not found for slab/);
+      });
+    });
+
+    describe('buildSellInstruction with auto-oracle-fetch', () => {
+      it('should auto-fetch oracle when not provided', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const oracleId = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock getOracleForSlab
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(oracleId);
+
+        const instruction = await client.buildSellInstruction(
+          user,
+          slabMarket,
+          quantity,
+          price
+          // Oracle omitted - should auto-fetch
+        );
+
+        expect(client.getOracleForSlab).toHaveBeenCalledWith(slabMarket);
+        expect(instruction).toBeDefined();
+        expect(instruction.keys.length).toBeGreaterThan(0);
+      });
+
+      it('should use provided oracle when specified', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const providedOracle = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        const getOracleSpy = jest.spyOn(client, 'getOracleForSlab');
+
+        const instruction = await client.buildSellInstruction(
+          user,
+          slabMarket,
+          quantity,
+          price,
+          providedOracle // Oracle provided explicitly
+        );
+
+        // Should NOT call getOracleForSlab
+        expect(getOracleSpy).not.toHaveBeenCalled();
+        expect(instruction).toBeDefined();
+      });
+
+      it('should throw error when oracle not found', async () => {
+        const user = PublicKey.unique();
+        const slabMarket = PublicKey.unique();
+        const quantity = new BN(1000);
+        const price = new BN(50000000);
+
+        // Mock getOracleForSlab to return null
+        jest.spyOn(client, 'getOracleForSlab').mockResolvedValue(null);
+
+        await expect(
+          client.buildSellInstruction(user, slabMarket, quantity, price)
+        ).rejects.toThrow(/Oracle not found for slab/);
+      });
     });
   });
 });

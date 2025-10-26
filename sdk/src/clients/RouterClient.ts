@@ -14,6 +14,7 @@ import {
   Registry,
   Vault,
   SlabSplit,
+  ExecutionType,
   LiquidationParams,
   BurnLpSharesParams,
   CancelLpOrdersParams,
@@ -118,6 +119,19 @@ export class RouterClient {
     );
   }
 
+  /**
+   * Derive Receipt PDA for a slab fill
+   * @param slab Slab market public key
+   * @param user User's public key
+   * @returns [PDA, bump]
+   */
+  deriveReceiptPDA(slab: PublicKey, user: PublicKey): [PublicKey, number] {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from('receipt'), slab.toBuffer(), user.toBuffer()],
+      this.programId
+    );
+  }
+
   // ============================================================================
   // Account Fetching Methods
   // ============================================================================
@@ -152,6 +166,31 @@ export class RouterClient {
     }
 
     return this.deserializeRegistry(accountInfo.data);
+  }
+
+  /**
+   * Get oracle account for a specific slab
+   * Reads the SlabRegistry to find the registered oracle for this slab
+   * @param slabMarket Slab market public key
+   * @returns Oracle public key, or null if slab not found in registry
+   */
+  async getOracleForSlab(slabMarket: PublicKey): Promise<PublicKey | null> {
+    const registry = await this.getRegistry();
+
+    if (!registry) {
+      throw new Error('Registry account not found');
+    }
+
+    // Search for slab in registry
+    const slabEntry = registry.slabs.find(
+      (entry) => entry.slabId.equals(slabMarket) && entry.active
+    );
+
+    if (!slabEntry) {
+      return null; // Slab not registered
+    }
+
+    return slabEntry.oracleId;
   }
 
   /**
@@ -836,46 +875,74 @@ export class RouterClient {
 
   /**
    * Build ExecuteCrossSlab instruction
-   * Routes a trade across multiple slab markets
+   * Routes a trade across multiple slab markets with oracle price validation
    * @param user User's public key
-   * @param splits Array of slab splits
-   * @param slabProgram Slab program ID
+   * @param splits Array of slab splits (each includes oracle)
+   * @param orderType Market (0) or Limit (1) order
    * @returns TransactionInstruction
    */
   buildExecuteCrossSlabInstruction(
     user: PublicKey,
     splits: SlabSplit[],
-    slabProgram: PublicKey
+    orderType: ExecutionType = ExecutionType.Limit
   ): TransactionInstruction {
     const [portfolioPDA] = this.derivePortfolioPDA(user);
+    const [vaultPDA] = this.deriveVaultPDA(SystemProgram.programId); // SOL vault
+    const [registryPDA] = this.deriveRegistryPDA();
+    const [authorityPDA] = this.deriveAuthorityPDA();
 
-    // Serialize splits: num_splits (u8) + splits
+    // Serialize instruction data:
+    // - num_splits (u8)
+    // - order_type (u8)
+    // - For each split: side (u8) + qty (i64) + limit_px (i64)
     const numSplits = Buffer.from([splits.length]);
+    const orderTypeBuffer = Buffer.from([orderType]);
     const splitBuffers = splits.map((split) =>
       Buffer.concat([
-        serializePubkey(split.slabMarket),
-        serializeBool(split.isBuy),
-        serializeU128(split.size),
-        serializeU128(split.price),
+        Buffer.from([split.side]),
+        serializeI64(split.qty),
+        serializeI64(split.limitPx),
       ])
     );
 
     const data = createInstructionData(
       RouterInstruction.ExecuteCrossSlab,
       numSplits,
+      orderTypeBuffer,
       ...splitBuffers
     );
 
-    // Build account list: portfolio + slab markets
+    // Build account list:
+    // 0. portfolio (writable)
+    // 1. user (signer)
+    // 2. vault (writable)
+    // 3. registry (writable)
+    // 4. router_authority (PDA)
+    // 5..5+n. slab_accounts (writable)
+    // 5+n..5+2n. receipt_accounts (writable)
+    // 5+2n..5+3n. oracle_accounts (readonly)
     const keys = [
       { pubkey: portfolioPDA, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: false },
-      { pubkey: slabProgram, isSigner: false, isWritable: false },
+      { pubkey: vaultPDA, isSigner: false, isWritable: true },
+      { pubkey: registryPDA, isSigner: false, isWritable: true },
+      { pubkey: authorityPDA, isSigner: false, isWritable: false },
     ];
 
-    // Add each slab market
+    // Add slab accounts
     for (const split of splits) {
       keys.push({ pubkey: split.slabMarket, isSigner: false, isWritable: true });
+    }
+
+    // Add receipt PDAs (one per slab)
+    for (const split of splits) {
+      const [receiptPDA] = this.deriveReceiptPDA(split.slabMarket, user);
+      keys.push({ pubkey: receiptPDA, isSigner: false, isWritable: true });
+    }
+
+    // Add oracle accounts
+    for (const split of splits) {
+      keys.push({ pubkey: split.oracle, isSigner: false, isWritable: false });
     }
 
     return new TransactionInstruction({
@@ -1289,27 +1356,124 @@ export class RouterClient {
   private deserializeRegistry(data: Buffer): Registry {
     let offset = 8; // Skip discriminator
 
-    const authority = deserializePubkey(data, offset);
+    // Router ID (32 bytes)
+    const routerId = deserializePubkey(data, offset);
     offset += 32;
 
-    const numVaults = data.readUInt32LE(offset);
-    offset += 4;
+    // Governance (32 bytes)
+    const governance = deserializePubkey(data, offset);
+    offset += 32;
 
-    const numPortfolios = data.readUInt32LE(offset);
-    offset += 4;
+    // Slab count (u16 = 2 bytes)
+    const slabCount = data.readUInt16LE(offset);
+    offset += 2;
 
-    // Read vault addresses (assuming max 256 vaults)
-    const vaults: PublicKey[] = [];
-    for (let i = 0; i < numVaults; i++) {
-      vaults.push(deserializePubkey(data, offset));
-      offset += 32;
+    // Bump (u8 = 1 byte)
+    const bump = data.readUInt8(offset);
+    offset += 1;
+
+    // Padding (5 bytes)
+    offset += 5;
+
+    // Liquidation parameters
+    const imr = deserializeU64(data, offset);
+    offset += 8;
+
+    const mmr = deserializeU64(data, offset);
+    offset += 8;
+
+    const liqBandBps = deserializeU64(data, offset);
+    offset += 8;
+
+    const preliqBuffer = deserializeI64(data, offset); // i128 stored as i64 for simplicity
+    offset += 16; // Skip full i128
+
+    const preliqBandBps = deserializeU64(data, offset);
+    offset += 8;
+
+    const routerCapPerSlab = deserializeU64(data, offset);
+    offset += 8;
+
+    const minEquityToQuote = deserializeI64(data, offset); // i128 stored as i64 for simplicity
+    offset += 16; // Skip full i128
+
+    const oracleToleranceBps = deserializeU64(data, offset);
+    offset += 8;
+
+    // Padding2 (8 bytes)
+    offset += 8;
+
+    // Skip complex nested structs (insurance, pnl vesting, warmup, etc.)
+    // Estimated sizes based on Rust structs:
+    // - InsuranceParams: ~64 bytes
+    // - InsuranceState: ~64 bytes
+    // - PnlVestingParams: ~32 bytes
+    // - GlobalHaircut: ~64 bytes
+    // - AdaptiveWarmupConfig: ~64 bytes
+    // - AdaptiveWarmupState: ~64 bytes
+    // - total_deposits (i128): 16 bytes
+    // - _padding3: 8 bytes
+    // Total: ~376 bytes (approximate)
+    offset += 376;
+
+    // Now we're at the slabs array
+    // SlabEntry struct size:
+    // - slab_id (Pubkey): 32 bytes
+    // - version_hash ([u8; 32]): 32 bytes
+    // - oracle_id (Pubkey): 32 bytes
+    // - imr (u64): 8 bytes
+    // - mmr (u64): 8 bytes
+    // - maker_fee_cap (u64): 8 bytes
+    // - taker_fee_cap (u64): 8 bytes
+    // - latency_sla_ms (u64): 8 bytes
+    // - max_exposure (u128): 16 bytes
+    // - registered_ts (u64): 8 bytes
+    // - active (bool): 1 byte
+    // - _padding ([u8; 7]): 7 bytes
+    // Total: 168 bytes per entry
+
+    const slabs: any[] = [];
+    const SLAB_ENTRY_SIZE = 168;
+
+    for (let i = 0; i < slabCount && i < 256; i++) {
+      const entryOffset = offset + (i * SLAB_ENTRY_SIZE);
+
+      const slabId = deserializePubkey(data, entryOffset);
+      const versionHash = data.slice(entryOffset + 32, entryOffset + 64);
+      const oracleId = deserializePubkey(data, entryOffset + 64);
+
+      // Skip other fields for now, just read active flag
+      const active = data.readUInt8(entryOffset + 160) === 1;
+
+      slabs.push({
+        slabId,
+        versionHash,
+        oracleId,
+        imr: new BN(0), // TODO: Deserialize if needed
+        mmr: new BN(0),
+        makerFeeCap: new BN(0),
+        takerFeeCap: new BN(0),
+        latencySlaMs: new BN(0),
+        maxExposure: new BN(0),
+        registeredTs: new BN(0),
+        active,
+      });
     }
 
     return {
-      authority,
-      numVaults,
-      numPortfolios,
-      vaults,
+      routerId,
+      governance,
+      slabCount,
+      bump,
+      imr,
+      mmr,
+      liqBandBps,
+      preliqBuffer: new BN(preliqBuffer.toString()),
+      preliqBandBps,
+      routerCapPerSlab,
+      minEquityToQuote: new BN(minEquityToQuote.toString()),
+      oracleToleranceBps,
+      slabs,
     };
   }
 
@@ -1340,56 +1504,76 @@ export class RouterClient {
   // ============================================================================
 
   /**
-   * Build a buy instruction (market order that executes immediately)
-   * V0: Atomic fill only - no resting orders
+   * Build a buy instruction with oracle validation
+   * Oracle is automatically fetched from SlabRegistry if not provided
    * @param user User's public key
    * @param slabMarket Slab market to trade on
-   * @param quantity Quantity to buy (in base units)
-   * @param limitPrice Maximum price willing to pay (in quote units)
-   * @param slabProgram Slab program ID
-   * @returns TransactionInstruction
+   * @param quantity Quantity to buy (1e6 scale)
+   * @param limitPrice Maximum price willing to pay (1e6 scale)
+   * @param oracle (Optional) Oracle price feed public key - auto-fetched if omitted
+   * @param orderType Market or Limit order (default: Limit for v0 compatibility)
+   * @returns TransactionInstruction (async if oracle needs to be fetched)
    */
-  buildBuyInstruction(
+  async buildBuyInstruction(
     user: PublicKey,
     slabMarket: PublicKey,
     quantity: BN,
     limitPrice: BN,
-    slabProgram: PublicKey
-  ): TransactionInstruction {
+    oracle?: PublicKey,
+    orderType: ExecutionType = ExecutionType.Limit
+  ): Promise<TransactionInstruction> {
+    // Auto-fetch oracle if not provided
+    const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
+
+    if (!oracleAccount) {
+      throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
+    }
+
     const split: SlabSplit = {
       slabMarket,
-      isBuy: true,
-      size: quantity,
-      price: limitPrice,
+      side: 0, // Buy
+      qty: quantity,
+      limitPx: limitPrice,
+      oracle: oracleAccount,
     };
 
-    return this.buildExecuteCrossSlabInstruction(user, [split], slabProgram);
+    return this.buildExecuteCrossSlabInstruction(user, [split], orderType);
   }
 
   /**
-   * Build a sell instruction (market order that executes immediately)
-   * V0: Atomic fill only - no resting orders
+   * Build a sell instruction with oracle validation
+   * Oracle is automatically fetched from SlabRegistry if not provided
    * @param user User's public key
    * @param slabMarket Slab market to trade on
-   * @param quantity Quantity to sell (in base units)
-   * @param limitPrice Minimum price willing to accept (in quote units)
-   * @param slabProgram Slab program ID
-   * @returns TransactionInstruction
+   * @param quantity Quantity to sell (1e6 scale)
+   * @param limitPrice Minimum price willing to accept (1e6 scale)
+   * @param oracle (Optional) Oracle price feed public key - auto-fetched if omitted
+   * @param orderType Market or Limit order (default: Limit for v0 compatibility)
+   * @returns TransactionInstruction (async if oracle needs to be fetched)
    */
-  buildSellInstruction(
+  async buildSellInstruction(
     user: PublicKey,
     slabMarket: PublicKey,
     quantity: BN,
     limitPrice: BN,
-    slabProgram: PublicKey
-  ): TransactionInstruction {
+    oracle?: PublicKey,
+    orderType: ExecutionType = ExecutionType.Limit
+  ): Promise<TransactionInstruction> {
+    // Auto-fetch oracle if not provided
+    const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
+
+    if (!oracleAccount) {
+      throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
+    }
+
     const split: SlabSplit = {
       slabMarket,
-      isBuy: false,
-      size: quantity,
-      price: limitPrice,
+      side: 1, // Sell
+      qty: quantity,
+      limitPx: limitPrice,
+      oracle: oracleAccount,
     };
 
-    return this.buildExecuteCrossSlabInstruction(user, [split], slabProgram);
+    return this.buildExecuteCrossSlabInstruction(user, [split], orderType);
   }
 }

@@ -111,13 +111,41 @@ export interface Portfolio {
 }
 
 /**
- * Registry account structure
+ * Slab entry in registry
+ */
+export interface SlabEntry {
+  slabId: PublicKey;
+  versionHash: Buffer;
+  oracleId: PublicKey;  // Oracle for this slab
+  imr: BN;              // Initial margin ratio (basis points)
+  mmr: BN;              // Maintenance margin ratio (basis points)
+  makerFeeCap: BN;
+  takerFeeCap: BN;
+  latencySlaMs: BN;
+  maxExposure: BN;
+  registeredTs: BN;
+  active: boolean;
+}
+
+/**
+ * Registry account structure (SlabRegistry in Rust)
  */
 export interface Registry {
-  authority: PublicKey;
-  numVaults: number;
-  numPortfolios: number;
-  vaults: PublicKey[];
+  routerId: PublicKey;
+  governance: PublicKey;
+  slabCount: number;
+  bump: number;
+  // Liquidation parameters
+  imr: BN;
+  mmr: BN;
+  liqBandBps: BN;
+  preliqBuffer: BN;
+  preliqBandBps: BN;
+  routerCapPerSlab: BN;
+  minEquityToQuote: BN;
+  oracleToleranceBps: BN;
+  // Registered slabs
+  slabs: SlabEntry[];
 }
 
 /**
@@ -131,13 +159,22 @@ export interface Vault {
 }
 
 /**
+ * Execution type enum (for oracle-validated fills)
+ */
+export enum ExecutionType {
+  Market = 0,
+  Limit = 1,
+}
+
+/**
  * Slab split for cross-slab routing
  */
 export interface SlabSplit {
   slabMarket: PublicKey;
-  isBuy: boolean;
-  size: BN;
-  price: BN;
+  side: number;      // 0 = Buy, 1 = Sell
+  qty: BN;           // i64 - quantity in 1e6 scale
+  limitPx: BN;       // i64 - limit price in 1e6 scale
+  oracle: PublicKey; // Oracle price feed for this slab
 }
 
 /**
