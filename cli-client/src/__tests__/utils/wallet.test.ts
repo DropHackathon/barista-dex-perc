@@ -96,8 +96,8 @@ describe('Wallet Utilities', () => {
       const config = getConfig('localnet');
 
       expect(config.cluster).toBe('localnet');
-      expect(config.routerProgramId).toBe('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr');
-      expect(config.slabProgramId).toBe('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk');
+      expect(config.routerProgramId).toBe('Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx');
+      expect(config.slabProgramId).toBe('Hq5XLwLMcEnoGQJbYBeNaTBuTecEoSryavnpYWes8jdW');
       expect(config.rpcUrl).toBe('http://localhost:8899');
     });
 

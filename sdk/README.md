@@ -113,60 +113,55 @@ async function createPortfolio() {
 }
 ```
 
-#### Deposit Collateral
+#### Deposit Collateral (SOL Only in v0)
 
 ```typescript
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-async function depositCollateral(mintAddress: string, amountUsd: number) {
-  const mint = new PublicKey(mintAddress);
+async function depositCollateral(solAmount: number) {
+  // Convert SOL to lamports
+  const amount = new BN(solAmount * LAMPORTS_PER_SOL);
 
-  // Get user's token account
-  const userTokenAccount = await getAssociatedTokenAddress(mint, wallet.publicKey);
+  // Automatically creates portfolio if it doesn't exist
+  const ensurePortfolioIxs = await router.ensurePortfolioInstructions(wallet.publicKey);
+  const depositIx = await router.buildDepositInstruction(amount, wallet.publicKey);
 
-  // Convert USD to token amount (assuming 6 decimals)
-  const amount = new BN(amountUsd * 1_000_000);
+  const tx = new Transaction()
+    .add(...ensurePortfolioIxs)
+    .add(depositIx);
 
-  const ix = router.buildDepositInstruction(
-    mint,
-    amount,
-    wallet.publicKey,
-    userTokenAccount
-  );
-
-  const tx = new Transaction().add(ix);
   const signature = await connection.sendTransaction(tx, [wallet]);
   await connection.confirmTransaction(signature);
 
-  console.log(`Deposited ${amountUsd} USDC:`, signature);
+  console.log(`Deposited ${solAmount} SOL:`, signature);
 }
 
-// Example: Deposit 1000 USDC
-const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
-await depositCollateral(USDC_MINT.toString(), 1000);
+// Example: Deposit 10 SOL
+await depositCollateral(10);
 ```
 
-#### Withdraw Collateral
+**Note**: v0 supports SOL deposits only. USDC and other SPL tokens will be supported in v1+.
+
+#### Withdraw Collateral (SOL Only in v0)
 
 ```typescript
-async function withdrawCollateral(mintAddress: string, amountUsd: number) {
-  const mint = new PublicKey(mintAddress);
-  const userTokenAccount = await getAssociatedTokenAddress(mint, wallet.publicKey);
-  const amount = new BN(amountUsd * 1_000_000);
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-  const ix = router.buildWithdrawInstruction(
-    mint,
-    amount,
-    wallet.publicKey,
-    userTokenAccount
-  );
+async function withdrawCollateral(solAmount: number) {
+  // Convert SOL to lamports
+  const amount = new BN(solAmount * LAMPORTS_PER_SOL);
 
-  const tx = new Transaction().add(ix);
+  const withdrawIx = await router.buildWithdrawInstruction(amount, wallet.publicKey);
+
+  const tx = new Transaction().add(withdrawIx);
   const signature = await connection.sendTransaction(tx, [wallet]);
   await connection.confirmTransaction(signature);
 
-  console.log(`Withdrew ${amountUsd} USDC:`, signature);
+  console.log(`Withdrew ${solAmount} SOL:`, signature);
 }
+
+// Example: Withdraw 5 SOL
+await withdrawCollateral(5);
 ```
 
 #### Check Portfolio Health
@@ -576,20 +571,19 @@ async function displayPortfolio(userAddress: PublicKey) {
 ## Error Handling
 
 ```typescript
-import { SendTransactionError } from '@solana/web3.js';
+import { SendTransactionError, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-async function safeDeposit(mint: PublicKey, amount: BN) {
+async function safeDeposit(solAmount: number) {
   try {
-    const userTokenAccount = await getAssociatedTokenAddress(mint, wallet.publicKey);
+    const amount = new BN(solAmount * LAMPORTS_PER_SOL);
 
-    const ix = router.buildDepositInstruction(
-      mint,
-      amount,
-      wallet.publicKey,
-      userTokenAccount
-    );
+    // Auto-create portfolio if needed
+    const ensurePortfolioIxs = await router.ensurePortfolioInstructions(wallet.publicKey);
+    const depositIx = await router.buildDepositInstruction(amount, wallet.publicKey);
 
-    const tx = new Transaction().add(ix);
+    const tx = new Transaction()
+      .add(...ensurePortfolioIxs)
+      .add(depositIx);
 
     // Add recent blockhash and fee payer
     tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
@@ -607,7 +601,7 @@ async function safeDeposit(mint: PublicKey, amount: BN) {
       throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
     }
 
-    console.log('Deposit successful:', signature);
+    console.log(`Deposited ${solAmount} SOL successfully:`, signature);
     return signature;
 
   } catch (error) {
@@ -644,9 +638,10 @@ new RouterClient(connection: Connection, programId: PublicKey, wallet?: Keypair)
 
 #### Instruction Builders
 - `buildInitializeInstruction(payer: PublicKey): TransactionInstruction`
-- `buildDepositInstruction(mint, amount, user, userTokenAccount): TransactionInstruction`
-- `buildWithdrawInstruction(mint, amount, user, userTokenAccount): TransactionInstruction`
+- `buildDepositInstruction(amount: BN, user: PublicKey): Promise<TransactionInstruction>` (SOL only in v0)
+- `buildWithdrawInstruction(amount: BN, user: PublicKey): Promise<TransactionInstruction>` (SOL only in v0)
 - `buildInitializePortfolioInstruction(user: PublicKey): TransactionInstruction`
+- `ensurePortfolioInstructions(user: PublicKey): Promise<TransactionInstruction[]>` (auto-creates portfolio if needed)
 - `buildExecuteCrossSlabInstruction(user, splits, slabProgram): TransactionInstruction`
 - `buildLiquidateUserInstruction(params: LiquidationParams): TransactionInstruction`
 - `buildBurnLpSharesInstruction(params: BurnLpSharesParams): TransactionInstruction`

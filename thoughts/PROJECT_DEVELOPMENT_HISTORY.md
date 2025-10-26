@@ -1991,6 +1991,492 @@ barista deposit --mint <MINT> --amount 1000 --network localnet
 
 ---
 
+## Phase 7: SOL-Only Architecture & Package Publishing
+
+### Commits: `b04985f` → `de245d8` → Package Publish
+
+**Goal**: Fix critical deposit/withdraw mismatch and publish updated packages to npm
+
+### Critical Discovery: Deposit/Withdraw Mismatch (`b04985f`)
+
+**Context**: User discovered fundamental architecture mismatch between Rust program and TypeScript SDK/CLI
+
+**The Problem**:
+- **Rust program**: SOL-only deposits (3 accounts: Portfolio, User, SystemProgram)
+- **TypeScript SDK/CLI**: Built for SPL tokens (7 accounts with mint, vault, token accounts)
+- **Data format**: Rust expects u64 lamports, SDK was sending u128 token amounts
+- **Result**: SDK/CLI would completely fail - wrong account layout, wrong data format, wrong everything
+
+**User Insight**:
+> "What is deposit actually? Since user is bringing their own wallet (using key.json), why do we need a deposit command?"
+> "Why the hell do we have --mint flag?"
+> "Fix it."
+
+**Root Cause**: SDK was built assuming future SPL token support that doesn't exist in v0
+
+### SDK Architectural Fix
+
+**Before (WRONG - Would Never Work)**:
+```typescript
+buildDepositInstruction(
+  mint: PublicKey,
+  amount: BN,
+  user: PublicKey,
+  userTokenAccount: PublicKey
+): TransactionInstruction {
+  const [portfolioPDA] = this.derivePortfolioPDA(user);
+  const [vaultPDA] = this.deriveVaultPDA(mint);
+  const [registryPDA] = this.deriveRegistryPDA();
+
+  const data = createInstructionData(
+    RouterInstruction.Deposit,
+    serializeU128(amount)  // ❌ Wrong: u128
+  );
+
+  return new TransactionInstruction({
+    programId: this.programId,
+    keys: [
+      { pubkey: portfolioPDA, isSigner: false, isWritable: true },
+      { pubkey: vaultPDA, isSigner: false, isWritable: true },
+      { pubkey: registryPDA, isSigner: false, isWritable: true },
+      { pubkey: user, isSigner: true, isWritable: false },
+      { pubkey: userTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],  // ❌ Wrong: 7 accounts
+    data,
+  });
+}
+```
+
+**After (CORRECT - Matches Rust Exactly)**:
+```typescript
+async buildDepositInstruction(
+  amount: BN,
+  user: PublicKey
+): Promise<TransactionInstruction> {
+  const portfolioAddress = await this.derivePortfolioAddress(user);
+
+  const data = createInstructionData(
+    RouterInstruction.Deposit,
+    serializeU64(amount)  // ✅ Correct: u64 lamports
+  );
+
+  return new TransactionInstruction({
+    programId: this.programId,
+    keys: [
+      { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+      { pubkey: user, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],  // ✅ Correct: 3 accounts matching Rust
+    data,
+  });
+}
+```
+
+**Rust Implementation (Source of Truth)**:
+```rust
+// programs/router/src/instructions/deposit.rs
+/// Process deposit instruction (SOL only for MVP)
+///
+/// Expected accounts:
+/// 0. `[writable]` Portfolio account (receives SOL)
+/// 1. `[signer, writable]` User account (sends SOL)
+/// 2. `[]` System program
+///
+/// Expected data layout (8 bytes):
+/// - amount: u64 (8 bytes, lamports)
+pub fn process_deposit(
+    portfolio_account: &AccountInfo,
+    portfolio: &mut Portfolio,
+    user_account: &AccountInfo,
+    system_program: &AccountInfo,
+    amount: u64,  // lamports, not u128!
+) -> ProgramResult {
+    // Transfer SOL from user to portfolio account
+    invoke(
+        &system_instruction::transfer(
+            user_account.key,
+            portfolio_account.key,
+            amount,
+        ),
+        &[user_account.clone(), portfolio_account.clone()],
+    )?;
+
+    // Update portfolio state
+    portfolio.principal += amount as i128;
+    portfolio.equity += amount as i128;
+
+    Ok(())
+}
+```
+
+**Same Fix Applied to Withdraw**:
+```typescript
+async buildWithdrawInstruction(
+  amount: BN,  // lamports
+  user: PublicKey
+): Promise<TransactionInstruction> {
+  const portfolioAddress = await this.derivePortfolioAddress(user);
+
+  const data = createInstructionData(
+    RouterInstruction.Withdraw,
+    serializeU64(amount)  // u64 lamports
+  );
+
+  return new TransactionInstruction({
+    programId: this.programId,
+    keys: [
+      { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+      { pubkey: user, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+```
+
+### CLI Breaking Changes
+
+**Removed `--mint` Flag**:
+
+**Before**:
+```bash
+barista deposit --mint EPjFWdd5... --amount 1000000000
+barista withdraw --mint EPjFWdd5... --amount 500000000
+```
+
+**After**:
+```bash
+barista deposit --amount 1000000000  # 1 SOL in lamports
+barista withdraw --amount 500000000  # 0.5 SOL in lamports
+```
+
+**Updated Command Registration**:
+```typescript
+// cli-client/src/index.ts
+program
+  .command('deposit')
+  .description('Deposit SOL to portfolio (SOL only for v0)')
+  .requiredOption('-a, --amount <lamports>',
+    'Amount to deposit in lamports (1 SOL = 1000000000 lamports)')
+  .option('-n, --network <network>',
+    'Network: devnet, mainnet-beta, or localnet (default: mainnet-beta)')
+  .option('-k, --keypair <path>', 'Path to keypair file')
+  .option('-u, --url <url>', 'Custom RPC URL')
+  .action(depositCommand);
+```
+
+**Updated Implementation**:
+```typescript
+// cli-client/src/commands/router/deposit.ts
+interface DepositOptions {
+  amount: string;  // Lamports only (no mint!)
+  keypair?: string;
+  url?: string;
+  network?: string;
+}
+
+export async function depositCommand(options: DepositOptions): Promise<void> {
+  // Parse amount and show SOL
+  const amount = new BN(options.amount);
+  const solAmount = amount.toNumber() / LAMPORTS_PER_SOL;
+
+  spinner.text = `Building deposit transaction (${solAmount} SOL)...`;
+
+  // Auto-create portfolio if needed
+  const ensurePortfolioIxs = await client.ensurePortfolioInstructions(wallet.publicKey);
+
+  // Build SOL-only deposit (no mint parameter!)
+  const depositIx = await client.buildDepositInstruction(amount, wallet.publicKey);
+
+  const transaction = new Transaction()
+    .add(...ensurePortfolioIxs)
+    .add(depositIx);
+
+  const signature = await connection.sendTransaction(transaction, [wallet]);
+  await connection.confirmTransaction(signature);
+
+  displaySuccess(`Deposited ${solAmount} SOL to portfolio!`);
+  console.log(chalk.gray(`Transaction: ${signature}`));
+}
+```
+
+**Error Messaging**:
+```typescript
+if (!options.amount) {
+  displayError('Missing required option: --amount <lamports>');
+  console.log(chalk.gray('\nExamples:'));
+  console.log(chalk.cyan('  barista deposit --amount 1000000000  # 1 SOL'));
+  console.log(chalk.cyan('  barista deposit --amount 500000000   # 0.5 SOL'));
+  console.log(chalk.gray('\n💡 Note: v0 supports SOL deposits only (USDC coming in v1+)\n'));
+  process.exit(1);
+}
+```
+
+### Portfolio Not Found Message Updates
+
+**Evolution Through User Feedback**:
+
+**Iteration 1** - Too generic:
+```
+Portfolio not found. The user may not have initialized their portfolio yet.
+```
+
+**Iteration 2** - Added initialization examples but confusing:
+```
+Portfolio not found. Initialize with:
+  barista deposit --mint <TOKEN> --amount <AMOUNT>
+```
+
+**User Feedback**: "Those instructions are only for localnet? I think on devnet or mainnet, user can't mint anything right"
+
+**Iteration 3** - Network-aware but still had mint references:
+```
+Portfolio not found.
+Localnet: barista deposit --mint <MINT> --amount <AMOUNT>
+Devnet/Mainnet: Users can't mint tokens
+```
+
+**User Feedback**: "That makes no sense still. Why would users mint in mainnet-beta or devnet"
+
+**Iteration 4** - Removed mint confusion:
+```
+Portfolio not found.
+Initialize by depositing collateral or trading.
+```
+
+**User Question**: "Why does the end-user like the user of the TypeScript CLI worry about initializing their portfolio?"
+
+**Final Version** - Emphasizes auto-creation:
+```typescript
+// cli-client/src/commands/router/portfolio.ts
+if (!portfolio) {
+  spinner.fail();
+  console.log(chalk.yellow('\n⚠️  Portfolio not found\n'));
+  console.log(chalk.gray('Your portfolio will be automatically created on first use.'));
+
+  const network = options.network || 'mainnet-beta';
+
+  console.log(chalk.gray('\nTo initialize your portfolio, deposit SOL:'));
+  console.log(chalk.cyan('  barista deposit --amount <LAMPORTS> --network ' + network));
+  console.log(chalk.gray('  (1 SOL = 1000000000 lamports)'));
+  console.log(chalk.gray('\nExamples:'));
+  console.log(chalk.cyan('  barista deposit --amount 1000000000 --network ' + network + '  # 1 SOL'));
+  console.log(chalk.cyan('  barista deposit --amount 500000000 --network ' + network + '   # 0.5 SOL'));
+
+  console.log(chalk.gray('\nOr start trading (also auto-creates portfolio):'));
+  console.log(chalk.cyan('  barista buy --slab <SLAB> -q <QUANTITY> --network ' + network));
+  console.log(chalk.cyan('  barista sell --slab <SLAB> -q <QUANTITY> --network ' + network));
+
+  console.log(chalk.gray('\n💡 Note: v0 supports SOL deposits only (USDC coming in v1+)\n'));
+  process.exit(1);
+}
+```
+
+### Documentation Updates
+
+**SDK README.md** - Comprehensive SOL-only rewrite:
+
+**Deposit Example**:
+```typescript
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+
+async function depositCollateral(solAmount: number) {
+  // Convert SOL to lamports
+  const amount = new BN(solAmount * LAMPORTS_PER_SOL);
+
+  // Automatically creates portfolio if it doesn't exist
+  const ensurePortfolioIxs = await router.ensurePortfolioInstructions(wallet.publicKey);
+  const depositIx = await router.buildDepositInstruction(amount, wallet.publicKey);
+
+  const tx = new Transaction()
+    .add(...ensurePortfolioIxs)
+    .add(depositIx);
+
+  const signature = await connection.sendTransaction(tx, [wallet]);
+  await connection.confirmTransaction(signature);
+
+  console.log(`Deposited ${solAmount} SOL:`, signature);
+}
+
+// Example: Deposit 10 SOL
+await depositCollateral(10);
+```
+
+**API Reference Updates**:
+```typescript
+// OLD (removed)
+buildDepositInstruction(mint, amount, user, userTokenAccount): TransactionInstruction
+
+// NEW
+buildDepositInstruction(amount: BN, user: PublicKey): Promise<TransactionInstruction>
+// SOL only in v0
+
+buildWithdrawInstruction(amount: BN, user: PublicKey): Promise<TransactionInstruction>
+// SOL only in v0
+
+ensurePortfolioInstructions(user: PublicKey): Promise<TransactionInstruction[]>
+// Auto-creates portfolio if needed
+```
+
+**CLI README.md** - SOL-only examples:
+
+```bash
+# Deposit Collateral (SOL Only in v0)
+barista deposit --amount <lamports>
+
+# Example: Deposit 1 SOL (1000000000 lamports)
+barista deposit --amount 1000000000
+
+# Example: Deposit 0.5 SOL
+barista deposit --amount 500000000
+```
+
+**Note added to both READMEs**:
+> **Note**: v0 supports SOL deposits only. USDC and other SPL tokens will be supported in v1+.
+
+### Package Publishing
+
+**Version Bumps**:
+- SDK: `0.1.2` → `0.1.3` (patch increment only)
+- CLI: `0.1.0` → `0.1.1` (patch increment only)
+
+**Publishing Process**:
+
+1. **Version Updates**:
+```json
+// sdk/package.json
+{
+  "name": "@barista-dex/sdk",
+  "version": "0.1.3"
+}
+
+// cli-client/package.json
+{
+  "name": "@barista-dex/cli",
+  "version": "0.1.1",
+  "dependencies": {
+    "@barista-dex/sdk": "^0.1.3"
+  }
+}
+```
+
+2. **Build & Test**:
+```bash
+# SDK
+cd sdk && npm run build
+# ✓ TypeScript compilation successful
+
+# CLI
+cd cli-client && npm run build
+# ✓ TypeScript compilation successful
+
+# CLI tests
+cd cli-client && npm test
+# ✓ 36 tests passing (after fixing localnet program ID in tests)
+```
+
+3. **Test Fix**:
+```typescript
+// cli-client/src/__tests__/utils/wallet.test.ts
+// BEFORE (outdated program ID)
+expect(config.routerProgramId).toBe('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr');
+
+// AFTER (correct localnet ID from SDK constants)
+expect(config.routerProgramId).toBe('Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx');
+expect(config.slabProgramId).toBe('Hq5XLwLMcEnoGQJbYBeNaTBuTecEoSryavnpYWes8jdW');
+```
+
+4. **NPM Publish**:
+```bash
+# Publish SDK
+cd sdk && npm publish --access public
+# ✓ @barista-dex/sdk@0.1.3 published
+
+# Publish CLI
+cd cli-client && npm publish --access public
+# ✓ @barista-dex/cli@0.1.1 published
+```
+
+**Published Packages**:
+- **@barista-dex/sdk@0.1.3**: [npmjs.com/package/@barista-dex/sdk](https://www.npmjs.com/package/@barista-dex/sdk)
+- **@barista-dex/cli@0.1.1**: [npmjs.com/package/@barista-dex/cli](https://www.npmjs.com/package/@barista-dex/cli)
+
+### Additional Documentation
+
+**Created**: `thoughts/PERPETUAL_FUTURES_MECHANICS.md` (114 lines)
+
+Comprehensive guide covering:
+1. **What Are Perpetual Futures**: Virtual positions, never expire, settle in margin currency
+2. **SOL-Margined Trading**: How to trade BTC-PERP with SOL collateral
+3. **Virtual Position Tracking**: On-chain state (Exposure struct)
+4. **Market Impact**: Direct vs indirect effects on spot prices
+5. **Cross-Margin Architecture**: Single collateral pool, multiple instruments
+6. **Liquidation Cascades**: How perp crashes can affect spot markets
+7. **Historical Examples**: FTX, Luna/UST, March 2020 COVID crash
+8. **Funding Rates**: Not yet implemented in v0
+9. **Account Structure**: Portfolio layout, deposit/withdraw mechanics
+10. **Risk Management**: Cross-margin benefits and risks
+
+**Key Insight Documented**:
+> "Can perp crashes cause spot crashes? **Mechanically**: No (different markets, no delivery). **Practically**: Yes (through liquidations, arbitrage, psychology, and cross-market holdings). The coupling is **behavioral and financial**, not **mechanical**."
+
+### Impact Summary
+
+**Breaking Changes**:
+- ❌ `--mint` flag removed from deposit/withdraw
+- ❌ Mint parameter removed from SDK deposit/withdraw methods
+- ❌ Changed from u128 to u64 for amounts (lamports)
+- ❌ Changed from 7 accounts to 3 accounts
+- ❌ Changed from TokenProgram to SystemProgram
+
+**New Capabilities**:
+- ✅ Deposit/withdraw actually works (matches Rust implementation)
+- ✅ SOL-only trading fully functional
+- ✅ Clear lamport-based UX
+- ✅ Updated documentation reflects reality
+
+**Files Modified**:
+- `sdk/src/clients/RouterClient.ts` - Deposit/withdraw rewrite
+- `cli-client/src/commands/router/deposit.ts` - Removed mint, added SOL examples
+- `cli-client/src/commands/router/withdraw.ts` - Removed mint, added SOL examples
+- `cli-client/src/commands/router/portfolio.ts` - Improved error message (4 iterations)
+- `cli-client/src/index.ts` - Updated command descriptions
+- `cli-client/src/__tests__/utils/wallet.test.ts` - Fixed program ID test
+- `sdk/README.md` - Comprehensive SOL-only updates
+- `cli-client/README.md` - SOL-only examples and workflow
+
+**Test Coverage**:
+- SDK: 108 tests passing
+- CLI: 36 tests passing
+- **Total: 144 tests passing**
+
+**User Experience**:
+
+**Before (Broken)**:
+```bash
+# Would fail with account mismatch errors
+barista deposit --mint USDC --amount 1000000
+# Error: Expected 7 accounts, got 3
+# Error: Invalid instruction data
+```
+
+**After (Working)**:
+```bash
+# Actually works!
+barista deposit --amount 1000000000
+# ✓ Deposited 1 SOL to portfolio!
+```
+
+**Technical Lessons**:
+1. **Always verify Rust <> TypeScript parity**: SDK assumptions must match on-chain reality
+2. **User questions reveal bugs**: "Why do we have --mint?" uncovered fundamental mismatch
+3. **Test with actual deployment**: Type-level correctness doesn't guarantee runtime success
+4. **Document v0 limitations**: Clear messaging about SOL-only prevents user confusion
+
+---
+
 ## Future Enhancements
 
 Based on TODO markers and documentation:

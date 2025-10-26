@@ -80,19 +80,29 @@ barista portfolio
 barista portfolio --address <trader-address>
 ```
 
-#### Deposit Collateral
+#### Deposit Collateral (SOL Only in v0)
 ```bash
-barista deposit --mint <token-mint> --amount <amount>
+barista deposit --amount <lamports>
 
-# Example: Deposit 100 USDC
-barista deposit --mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v --amount 100000000
+# Example: Deposit 1 SOL (1000000000 lamports)
+barista deposit --amount 1000000000
+
+# Example: Deposit 0.5 SOL
+barista deposit --amount 500000000
 ```
 
-**Note:** Amounts are in base units (1 USDC = 1000000)
+**Note:**
+- Amounts are in lamports (1 SOL = 1,000,000,000 lamports)
+- v0 supports SOL deposits only
+- Portfolio is automatically created on first deposit
+- USDC and other SPL tokens coming in v1+
 
-#### Withdraw Collateral
+#### Withdraw Collateral (SOL Only in v0)
 ```bash
-barista withdraw --mint <token-mint> --amount <amount>
+barista withdraw --amount <lamports>
+
+# Example: Withdraw 0.5 SOL
+barista withdraw --amount 500000000
 ```
 
 ### Market Data
@@ -124,10 +134,8 @@ All commands support the following options:
 ### Complete Trading Workflow
 
 ```bash
-# 1. Deposit USDC collateral (100 USDC)
-barista deposit \
-  --mint EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v \
-  --amount 100000000
+# 1. Deposit SOL collateral (10 SOL = 10000000000 lamports)
+barista deposit --amount 10000000000
 
 # 2. Check your portfolio
 barista portfolio
@@ -138,8 +146,14 @@ barista price --slab SLaBZ6Ps...
 # 4. View order book depth
 barista book --slab SLaBZ6Ps... --levels 10
 
-# 5. Withdraw funds
-barista withdraw --mint EPjFWdd5... --amount 50000000
+# 5. Place a buy order
+barista buy --slab SLaBZ6Ps... --quantity 1000000
+
+# 6. Place a sell order
+barista sell --slab SLaBZ6Ps... --quantity 500000
+
+# 7. Withdraw funds (5 SOL)
+barista withdraw --amount 5000000000
 ```
 
 ### Example Output
