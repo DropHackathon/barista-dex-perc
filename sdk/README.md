@@ -36,17 +36,27 @@ console.log('Portfolio initialized!');
 
 ### Router Program
 The Router is the global coordinator that handles:
-- **Collateral Management**: Unified vault system for all deposited assets
+- **Collateral Management**: SOL deposits/withdrawals (v0.5)
 - **Portfolio Margin**: Cross-margin accounts with health-based risk management
-- **Cross-Slab Routing**: Intelligent order routing across multiple LP markets
+- **PnL Settlement**: Real SOL transfers between portfolios (v0.5 counterparty model)
+- **Cross-Slab Routing**: Single-slab execution (v0.5), multi-slab in v1+
 - **Liquidations**: Automated liquidation of undercollateralized positions
 
 ### Slab Program
 Slabs are LP-run perpetual markets that:
-- Run independent order books (v0: atomic fills only)
+- Run independent order books (v0.5: atomic fills only, v1: resting orders)
 - Settle against mark price oracles
 - Charge taker fees to traders
 - Allow LPs to earn spread and fees
+
+### v0.5 PnL Settlement Model
+**Important**: v0.5 implements **DLP counterparty settlement**:
+- Each slab has an LP/DLP owner who provides liquidity
+- DLP creates a Portfolio account and deposits SOL capital
+- Trades settle with **real SOL transfers** between User Portfolio ↔ DLP Portfolio
+- **Zero-sum**: User profit = DLP loss (and vice versa)
+- **Single-slab**: Only 1 slab per trade (cross-slab routing disabled in v0.5)
+- **v1 migration**: Same Portfolio account will track LP inventory PnL (order book model)
 
 ## Complete Usage Guide
 

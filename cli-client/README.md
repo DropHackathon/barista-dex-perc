@@ -68,6 +68,25 @@ barista portfolio
 barista portfolio --network devnet
 ```
 
+## v0.5 Limitations
+
+**Important:** This CLI interfaces with v0.5 (counterparty settlement model):
+
+- **Market orders only** - Executes instantly at oracle price (±0.5% slippage tolerance)
+- **Limit orders execute instantly** (NOT resting orders) - Price validation only, fills immediately
+- **Single slab execution** - Must specify `--slab` (cross-slab smart routing disabled in v0.5)
+- **Single instrument per slab** - v1+ will support up to 32 instruments per slab
+- **Atomic fills** - No partial fills or order book
+- **SOL collateral only** - v1+ will support multi-collateral (USDC, etc.)
+- **PnL settles against DLP vault** - Each slab has an LP/DLP providing liquidity as counterparty
+  - User profit = DLP loss (SOL transferred from DLP Portfolio → User Portfolio)
+  - User loss = DLP profit (SOL transferred from User Portfolio → DLP Portfolio)
+- **v1 order book** - Migration will enable resting orders, cross-slab routing, trader-to-trader matching
+
+For more details on v0.5 → v1 migration, see [V1_ROADMAP.md](../thoughts/V1_ROADMAP.md).
+
+---
+
 ## Commands
 
 ### Portfolio Management
@@ -107,45 +126,37 @@ barista withdraw --amount 500000000
 
 ### Trading
 
-Barista CLI supports two trading modes:
+#### Execute Orders (v0.5: Single Slab Required)
 
-#### Smart Routing (Automatic Best Execution)
-
-Use `--instrument` to automatically find the best price across all slabs:
+**v0.5**: Must specify `--slab` for all trades. Cross-slab smart routing is disabled.
 
 ```bash
-# Buy with smart routing (finds cheapest ask)
-barista buy --instrument <INSTRUMENT_PUBKEY> -q 1000000
+# Market buy (executes at oracle price)
+barista buy --slab <SLAB_ADDRESS> -q 1000
 
-# Sell with smart routing (finds highest bid)
-barista sell --instrument <INSTRUMENT_PUBKEY> -q 500000
+# Market sell
+barista sell --slab <SLAB_ADDRESS> -q 500
 
-# With leverage
-barista buy --instrument <INSTRUMENT_PUBKEY> -q 1000000 -l 5x
+# Limit buy (sanity-checked, executes instantly)
+barista buy --slab <SLAB_ADDRESS> -q 1000 -p 50000000
+
+# With leverage (5x)
+barista buy --slab <SLAB_ADDRESS> -q 1000 -l 5x
 ```
 
-**Benefits:**
-- Automatic best price discovery
-- No need to track multiple slab addresses
-- Guaranteed best execution across venues
-- Capital efficient cross-margin netting
+**v0.5 Behavior:**
+- `--slab` is **required** (single-slab execution only)
+- `--instrument` is **optional** (for future multi-instrument slabs in v1+)
+- Orders execute instantly (no order book)
+- Market orders: Filled at oracle price ± 0.5% slippage
+- Limit orders: Price validated within ±20% of oracle, then filled instantly
+- Settlement: Real SOL transfer between User Portfolio ↔ DLP Portfolio
 
-#### Manual Slab Selection
-
-Use `--slab` to trade on a specific slab:
-
-```bash
-# Buy on specific slab
-barista buy --slab <SLAB_ADDRESS> -q 1000000
-
-# Sell with limit price
-barista sell --slab <SLAB_ADDRESS> -q 500000 -p 50000000
-
-# With leverage
-barista buy --slab <SLAB_ADDRESS> -q 1000000 -l 5x
-```
-
-**Note:** You must specify either `--slab` OR `--instrument`, not both.
+**v1 (Future):**
+- `--slab` will be optional (cross-slab smart routing re-enabled)
+- `--instrument` will enable best price discovery across slabs
+- Resting limit orders will wait for price
+- Trader-to-trader matching via order book
 
 ### Market Data
 
