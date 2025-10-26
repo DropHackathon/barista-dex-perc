@@ -53,6 +53,7 @@ pub enum PercolatorError {
     InvalidOracle = 215,
     PriceUnavailable = 216,
     PriceSlippage = 217,
+    InvalidReceipt = 218,
 
     // Matching errors (300-399)
     InvalidSide = 300,

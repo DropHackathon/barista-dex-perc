@@ -292,11 +292,32 @@ pub fn process_execute_cross_slab(
         .map_err(|_| PercolatorError::CpiFailed)?;
     }
 
-    // Phase 3: Aggregate fills and update portfolio
-    // For each split, update the portfolio exposure
+    // Phase 3: Read receipts and settle PnL
+    let mut total_realized_pnl: i128 = 0;
+
     for (i, split) in splits.iter().enumerate() {
-        // In v0, assume fill is successful
-        let filled_qty = split.qty;
+        let receipt_account = &receipt_accounts[i];
+
+        // Read FillReceipt from slab response
+        let receipt_data = receipt_account
+            .try_borrow_data()
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        if receipt_data.len() < FillReceipt::LEN {
+            msg!("Error: Invalid receipt account size");
+            return Err(PercolatorError::InvalidAccount);
+        }
+
+        // Deserialize receipt (FillReceipt is repr(C), so we can cast)
+        let receipt = unsafe { &*(receipt_data.as_ptr() as *const FillReceipt) };
+
+        if !receipt.is_used() {
+            msg!("Error: Receipt not written by slab");
+            return Err(PercolatorError::InvalidReceipt);
+        }
+
+        let filled_qty = receipt.filled_qty;
+        let vwap_px = receipt.vwap_px;
 
         // Update portfolio exposure for this slab/instrument
         // For v0, we'll use slab index and instrument 0 (simplified)
@@ -306,7 +327,18 @@ pub fn process_execute_cross_slab(
         // Get current exposure
         let current_exposure = portfolio.get_exposure(slab_idx, instrument_idx);
 
-        // Update based on side: Buy = add qty, Sell = subtract qty
+        // Calculate realized PnL if reducing position
+        let realized_pnl = calculate_realized_pnl(
+            current_exposure,
+            filled_qty,
+            split.side,
+            vwap_px,
+            split.limit_px, // Use limit price as approximate entry price
+        );
+
+        total_realized_pnl = total_realized_pnl.saturating_add(realized_pnl);
+
+        // Update exposure: Buy = add qty, Sell = subtract qty
         let new_exposure = if split.side == 0 {
             // Buy
             current_exposure + filled_qty
@@ -317,6 +349,9 @@ pub fn process_execute_cross_slab(
 
         portfolio.update_exposure(slab_idx, instrument_idx, new_exposure);
     }
+
+    // Settle PnL between user and vault (counterparty)
+    settle_pnl(portfolio, vault, total_realized_pnl)?;
 
     // Phase 3.5: Accrue insurance fees from taker fills
     // Calculate total notional across all splits and accrue insurance
@@ -350,15 +385,11 @@ pub fn process_execute_cross_slab(
     portfolio.update_margin(im_required, im_required / 2); // MM = IM / 2 for v0
 
     // Phase 5: Check if portfolio has sufficient margin
-    // For v0, we assume equity is managed separately via vault
-    // In production, this would check vault.equity >= portfolio.im
+    // Equity now includes realized PnL from this trade
     if !portfolio.has_sufficient_margin() {
         msg!("Error: Insufficient margin");
         return Err(PercolatorError::PortfolioInsufficientMargin);
     }
-
-    let _ = vault; // Will be used in production for equity checks
-    let _ = receipt_accounts; // Will be used for real CPI
 
     msg!("ExecuteCrossSlab completed successfully");
     Ok(())
@@ -387,6 +418,88 @@ fn calculate_initial_margin(net_exposure: i64, splits: &[SlabSplit]) -> u128 {
     // IM = abs(net_exposure) * price * 0.1 / 1e6 (scale factor)
     // For v0 proof: if net_exposure = 0, IM = 0!
     (abs_exposure * avg_price * 10) / (100 * 1_000_000)
+}
+
+/// Calculate realized PnL from a fill
+/// Returns: PnL in lamports (1e6 scale, signed)
+///
+/// Logic:
+/// - If opening/adding to position: No realized PnL (return 0)
+/// - If reducing/closing position: PnL = qty_closed * (exit_price - entry_price)
+fn calculate_realized_pnl(
+    current_exposure: i64,
+    filled_qty: i64,
+    side: u8,
+    exit_price: i64,
+    entry_price: i64,
+) -> i128 {
+    // Determine direction of fill
+    let fill_direction = if side == 0 { filled_qty } else { -filled_qty };
+
+    // Check if reducing position (opposite sign)
+    let is_reducing = (current_exposure > 0 && fill_direction < 0)
+        || (current_exposure < 0 && fill_direction > 0);
+
+    if !is_reducing {
+        // Opening or adding to position - no realized PnL
+        return 0;
+    }
+
+    // Calculate quantity being closed
+    let qty_closed = fill_direction.abs().min(current_exposure.abs());
+
+    // PnL = qty_closed * (exit_price - entry_price)
+    // Account for long vs short position
+    let price_diff = (exit_price as i128) - (entry_price as i128);
+    let pnl = if current_exposure > 0 {
+        // Closing long: profit when exit > entry
+        (qty_closed as i128) * price_diff / 1_000_000 // Scale down from 1e6
+    } else {
+        // Closing short: profit when exit < entry
+        -(qty_closed as i128) * price_diff / 1_000_000
+    };
+
+    pnl
+}
+
+/// Settle PnL between user portfolio and LP vault (counterparty)
+///
+/// In v0, LP vault acts as counterparty for all trades:
+/// - User gains (+PnL) → User portfolio.pnl increases, LP vault.balance decreases (LP loses)
+/// - User loses (-PnL) → User portfolio.pnl decreases, LP vault.balance increases (LP gains)
+///
+/// Note: This differs from the formal model's "vault" which represents total system funds.
+/// Here, "vault" is the LP's capital that backs trades (zero-sum counterparty).
+fn settle_pnl(
+    portfolio: &mut Portfolio,
+    vault: &mut Vault,
+    realized_pnl: i128,
+) -> Result<(), PercolatorError> {
+    if realized_pnl == 0 {
+        return Ok(());
+    }
+
+    // Update user's PnL ledger
+    portfolio.pnl = portfolio.pnl.saturating_add(realized_pnl);
+
+    // Update LP vault balance (counterparty - zero-sum)
+    if realized_pnl > 0 {
+        // User won → LP loses (vault balance decreases)
+        let profit = realized_pnl as u128;
+        if vault.balance < profit {
+            msg!("Error: LP vault insufficient funds to cover user profit");
+            return Err(PercolatorError::InsufficientFunds);
+        }
+        vault.balance = vault.balance.saturating_sub(profit);
+        msg!("User profit settled from LP vault");
+    } else {
+        // User lost → LP gains (vault balance increases)
+        let loss = (-realized_pnl) as u128;
+        vault.balance = vault.balance.saturating_add(loss);
+        msg!("User loss settled to LP vault");
+    }
+
+    Ok(())
 }
 
 // Exclude test module from BPF builds to avoid stack overflow from test-only functions
