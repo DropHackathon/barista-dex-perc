@@ -43,10 +43,14 @@ pub fn determine_mode(health: i128, preliq_buffer: i128) -> Option<LiquidationMo
 /// reduce-only orders across slabs to bring them back to health.
 ///
 /// # Arguments
+/// * `portfolio_account` - User's portfolio AccountInfo (for CPI)
 /// * `portfolio` - User's portfolio account (to be liquidated)
+/// * `dlp_portfolio_account` - DLP portfolio AccountInfo (for CPI)
+/// * `dlp_portfolio` - DLP portfolio (counterparty)
 /// * `registry` - Slab registry with liquidation parameters
 /// * `vault` - Collateral vault
 /// * `router_authority` - Router authority PDA (for CPI signing)
+/// * `system_program` - System program account
 /// * `oracle_accounts` - Oracle price feed accounts (for price validation)
 /// * `slab_accounts` - Array of slab accounts to execute on
 /// * `receipt_accounts` - Array of receipt PDAs (one per slab)
@@ -59,10 +63,14 @@ pub fn determine_mode(health: i128, preliq_buffer: i128) -> Option<LiquidationMo
 /// * Enforces reduce-only (no position increases)
 /// * All-or-nothing atomicity
 pub fn process_liquidate_user(
+    portfolio_account: &AccountInfo,
     portfolio: &mut Portfolio,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
     registry: &mut SlabRegistry,
     vault: &mut Vault,
     router_authority: &AccountInfo,
+    system_program: &AccountInfo,
     oracle_accounts: &[AccountInfo],
     slab_accounts: &[AccountInfo],
     receipt_accounts: &[AccountInfo],
@@ -226,11 +234,14 @@ pub fn process_liquidate_user(
     let user_pubkey = portfolio.user;
     use crate::instructions::process_execute_cross_slab;
     process_execute_cross_slab(
+        portfolio_account,
         portfolio,
         &user_pubkey,
-        vault,
+        dlp_portfolio_account,
+        dlp_portfolio,
         registry,
         router_authority,
+        system_program,
         &slab_accounts[..plan.split_count],
         &receipt_accounts[..plan.split_count],
         &oracle_accounts[..plan.split_count], // Pass oracles for validation

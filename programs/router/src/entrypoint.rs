@@ -405,19 +405,23 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
 ///
 /// Total size: 11 bytes
 fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 4 {
-        msg!("Error: LiquidateUser requires at least 4 accounts");
+    if accounts.len() < 6 {
+        msg!("Error: LiquidateUser requires at least 6 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     let portfolio_account = &accounts[0];
-    let registry_account = &accounts[1];
-    let vault_account = &accounts[2];
-    let router_authority = &accounts[3];
+    let dlp_portfolio_account = &accounts[1];
+    let registry_account = &accounts[2];
+    let vault_account = &accounts[3];
+    let router_authority = &accounts[4];
+    let system_program = &accounts[5];
 
     // Validate accounts
     validate_owner(portfolio_account, program_id)?;
     validate_writable(portfolio_account)?;
+    validate_owner(dlp_portfolio_account, program_id)?;
+    validate_writable(dlp_portfolio_account)?;
     validate_owner(registry_account, program_id)?;
     validate_writable(registry_account)?;
     validate_owner(vault_account, program_id)?;
@@ -425,6 +429,7 @@ fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], d
 
     // Borrow account data mutably
     let portfolio = unsafe { borrow_account_data_mut::<Portfolio>(portfolio_account)? };
+    let dlp_portfolio = unsafe { borrow_account_data_mut::<Portfolio>(dlp_portfolio_account)? };
     let registry = unsafe { borrow_account_data_mut::<SlabRegistry>(registry_account)? };
     let vault = unsafe { borrow_account_data_mut::<Vault>(vault_account)? };
 
@@ -441,23 +446,27 @@ fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], d
     let current_ts = reader.read_u64()?;
 
     // Verify we have enough accounts
-    let required_accounts = 4 + num_oracles + num_slabs * 2;
+    let required_accounts = 6 + num_oracles + num_slabs * 2;
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for LiquidateUser");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     // Split accounts
-    let oracle_accounts = &accounts[4..4 + num_oracles];
-    let slab_accounts = &accounts[4 + num_oracles..4 + num_oracles + num_slabs];
-    let receipt_accounts = &accounts[4 + num_oracles + num_slabs..4 + num_oracles + num_slabs * 2];
+    let oracle_accounts = &accounts[6..6 + num_oracles];
+    let slab_accounts = &accounts[6 + num_oracles..6 + num_oracles + num_slabs];
+    let receipt_accounts = &accounts[6 + num_oracles + num_slabs..6 + num_oracles + num_slabs * 2];
 
     // Call the instruction handler
     process_liquidate_user(
+        portfolio_account,
         portfolio,
+        dlp_portfolio_account,
+        dlp_portfolio,
         registry,
         vault,
         router_authority,
+        system_program,
         oracle_accounts,
         slab_accounts,
         receipt_accounts,
