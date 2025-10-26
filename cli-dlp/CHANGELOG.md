@@ -5,6 +5,33 @@ All notable changes to `@barista-dex/cli-dlp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-10-26
+
+### Added
+- **Oracle Management Commands**
+  - `oracle:init` - Initialize price oracle for an instrument
+  - `oracle:view` - View oracle details and current price
+  - `oracle:update` - Update oracle price and confidence interval
+- Interactive prompts for oracle initialization and updates
+- Oracle PDA derivation from `['oracle', instrument]`
+- Automatic staleness warnings for prices older than 5 minutes
+- Price age display (e.g., "2m ago", "10h ago", "5d ago")
+- Authority verification and ownership indicators
+- Confidence interval support for price uncertainty
+- Environment variable `BARISTA_ORACLE_PROGRAM_ID` support
+
+### Changed
+- Updated README with comprehensive oracle command documentation
+- Updated LOCALNET_TRADING_SIMULATOR_GUIDE to use `oracle:init` instead of manual scripts
+- Enhanced welcome message to include oracle commands
+
+### Technical
+- Price and confidence scaled by 1,000,000 internally
+- Oracle account size: 128 bytes
+- Automatic Unix timestamp on price updates
+- Uses oracle program's initialize and update_price instructions
+- Manual account creation with SystemProgram.createAccount
+
 ## [0.1.1] - 2025-10-26
 
 ### Added
@@ -84,11 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `analytics:exposure` - View PnL exposure across slabs
 - `analytics:stats` - Performance metrics (volume, fees, APY)
 - `analytics:trades` - Recent trade history
-- Oracle management commands
 - Batch operations support
 - Historical PnL tracking
 
 ---
 
+[0.1.2]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.1.2
 [0.1.1]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.1.1
 [0.1.0]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.1.0
