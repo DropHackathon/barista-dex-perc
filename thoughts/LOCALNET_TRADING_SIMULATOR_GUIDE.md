@@ -387,6 +387,36 @@ barista portfolio --keypair ~/.config/solana/trader2.json --network localnet
 
 Now you can simulate trading!
 
+### 6.0: Check Oracle Price (Optional)
+
+Before trading, you can verify the current oracle price:
+
+```bash
+# Check oracle price by instrument
+barista price \
+  --instrument <INSTRUMENT_ID> \
+  --network localnet
+
+# Or check oracle price directly
+barista price \
+  --oracle <ORACLE_ADDRESS> \
+  --network localnet
+
+# Expected output:
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ORACLE PRICE (Testing/Localnet)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Price:       $50,000.00
+# Updated:     5s ago
+#
+# Oracle:     <ORACLE_ADDRESS>
+# Instrument: <INSTRUMENT_ID>
+# Authority:  <DLP_PUBKEY>
+#
+# Note: Custom oracle for localnet testing only.
+```
+
 ### 6.1: Trader 1 - Buy BTC-PERP
 
 ```bash
@@ -638,8 +668,11 @@ barista-dlp oracle:update \
 #   Confidence:   ±$0.00
 #   Transaction:  4kE8pN...qRt5M
 
-# Verify update
+# Verify update (DLP)
 barista-dlp oracle:view --address <ORACLE_ADDRESS>
+
+# Traders can also check the new price
+barista price --oracle <ORACLE_ADDRESS> --network localnet
 ```
 
 ---
@@ -666,8 +699,22 @@ solana transaction-history <ADDRESS> --url localhost
 ### Slab Statistics
 
 ```bash
-# View slab details
+# View slab details (DLP)
 barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
+```
+
+### Oracle Price Monitoring
+
+```bash
+# Check current oracle price (traders)
+barista price --instrument <INSTRUMENT_ID> --network localnet
+barista price --oracle <ORACLE_ADDRESS> --network localnet
+
+# View oracle details with staleness warnings (DLP)
+barista-dlp oracle:view --address <ORACLE_ADDRESS>
+
+# Watch oracle price (updates every 5 seconds)
+watch -n 5 "barista price --oracle <ORACLE_ADDRESS> --network localnet"
 ```
 
 ---
