@@ -78,13 +78,14 @@ anchor --version
 ### 2. Repository Setup
 
 ```bash
-# Clone the repository
+# Clone the repository (only needed for deploying programs)
 git clone https://github.com/barista-dex/barista-dex.git
 cd barista-dex
 
-# Install dependencies
-cargo build
-npm install
+# Build programs
+cargo build --release
+
+# Note: CLI tools will be installed from npm (see Step 4 and Step 5)
 ```
 
 ---
@@ -199,10 +200,13 @@ solana balance <DLP_PUBKEY> --url localhost
 ### 4.2: Install DLP CLI
 
 ```bash
-# Install the DLP CLI globally
+# Install the DLP CLI globally from npm
 npm install -g @barista-dex/cli-dlp
 
-# Or use npx (no installation)
+# Verify installation
+barista-dlp --help
+
+# Or use npx (no installation required)
 npx @barista-dex/cli-dlp --help
 
 # Set environment variables for convenience
@@ -332,15 +336,14 @@ Create multiple trader accounts to simulate a trading environment.
 ### 5.1: Install Trader CLI
 
 ```bash
-# Install trader CLI
-cd ../cli-client
-npm install
-npm run build
-npm link
+# Install the trader CLI globally from npm
+npm install -g @barista-dex/cli-client
 
-# Or use from workspace
-cd ../cli-client
-npm run barista -- --help
+# Verify installation
+barista --help
+
+# Or use npx (no installation required)
+npx @barista-dex/cli-client --help
 ```
 
 ### 5.2: Create Trader Wallets
