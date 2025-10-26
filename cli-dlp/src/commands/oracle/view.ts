@@ -1,12 +1,16 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import Table from 'cli-table3';
-import { getConnection, loadWallet } from '../../utils/config';
+import { loadKeypair } from '../../utils/wallet';
+import { createConnection } from '../../utils/network';
 import { displayError, formatPubkey } from '../../utils/display';
 
 export interface ViewOracleOptions {
   address: string;
+  keypair?: string;
+  network?: string;
+  url?: string;
 }
 
 interface PriceOracle {
@@ -71,14 +75,17 @@ export async function viewOracleCommand(options: ViewOracleOptions): Promise<voi
   const spinner = ora();
 
   try {
-    const connection = getConnection();
+    const network = (options.network || 'localnet') as 'localnet' | 'devnet' | 'mainnet-beta';
+    const connection = createConnection(network, options.url);
 
     // Load wallet if available (for ownership check)
     let wallet: any = null;
-    try {
-      wallet = loadWallet();
-    } catch (e) {
-      // No wallet - skip ownership check
+    if (options.keypair) {
+      try {
+        wallet = loadKeypair(options.keypair);
+      } catch (e) {
+        // No wallet - skip ownership check
+      }
     }
 
     // Parse oracle address
@@ -130,9 +137,7 @@ export async function viewOracleCommand(options: ViewOracleOptions): Promise<voi
 
     // Calculate age
     const now = Math.floor(Date.now() / 1000);
-    const age = oracle.timestamp > 0n
-      ? now - Number(oracle.timestamp)
-      : null;
+    const age = oracle.timestamp > 0n ? now - Number(oracle.timestamp) : null;
 
     const ageStr = age !== null
       ? age < 60

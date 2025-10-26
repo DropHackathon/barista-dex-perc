@@ -1,8 +1,9 @@
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import inquirer from 'inquirer';
-import { getConnection, loadWallet } from '../../utils/config';
+import { loadKeypair } from '../../utils/wallet';
+import { createConnection } from '../../utils/network';
 import { displayError, displaySuccess, formatPubkey } from '../../utils/display';
 
 export interface UpdateOracleOptions {
@@ -11,6 +12,9 @@ export interface UpdateOracleOptions {
   confidence?: string;
   oracleProgram?: string;
   yes?: boolean;
+  keypair?: string;
+  network?: string;
+  url?: string;
 }
 
 /**
@@ -21,8 +25,15 @@ export async function updateOracleCommand(options: UpdateOracleOptions): Promise
 
   try {
     // Load wallet and connection
-    const wallet = loadWallet();
-    const connection = getConnection();
+    const keypairPath = options.keypair || process.env.BARISTA_DLP_KEYPAIR;
+    if (!keypairPath) {
+      displayError('Keypair path required. Use --keypair or set BARISTA_DLP_KEYPAIR');
+      process.exit(1);
+    }
+
+    const wallet = loadKeypair(keypairPath);
+    const network = (options.network || 'localnet') as 'localnet' | 'devnet' | 'mainnet-beta';
+    const connection = createConnection(network, options.url);
 
     spinner.start('Loading oracle...');
 

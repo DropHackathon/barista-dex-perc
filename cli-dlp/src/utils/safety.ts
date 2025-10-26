@@ -39,7 +39,7 @@ export function checkWithdrawalSafety(
   if (openInterest > 0) {
     result.safe = false;
     result.errors.push(
-      `Cannot withdraw with open positions. Open interest: ${openInterest} (${portfolio.exposure_count} exposures)`
+      `Cannot withdraw with open positions. Open interest: ${openInterest} (${portfolio.exposureCount} exposures)`
     );
     return result;
   }
@@ -52,7 +52,15 @@ export function checkWithdrawalSafety(
     );
   }
 
-  // Check 4: Capital utilization after withdrawal
+  // Check 4: Large withdrawal percentage
+  const withdrawalPercentage = withdrawAmount.mul(new BN(100)).div(equity);
+  if (withdrawalPercentage.gt(new BN(50))) {
+    result.warnings.push(
+      `Withdrawing ${withdrawalPercentage.toString()}% of portfolio equity`
+    );
+  }
+
+  // Check 5: Capital utilization after withdrawal
   const equityAfter = equity.sub(withdrawAmount);
   const safetyBuffer = withdrawAmount.mul(new BN(10)).div(new BN(100)); // 10% buffer
 
@@ -62,7 +70,7 @@ export function checkWithdrawalSafety(
     );
   }
 
-  // Check 5: Minimum capital threshold
+  // Check 6: Minimum capital threshold
   const minCapital = new BN(10_000_000_000); // 10 SOL
   if (equityAfter.lt(minCapital)) {
     result.warnings.push(
@@ -83,6 +91,13 @@ export function checkDepositAmount(amount: BN): SafetyCheckResult {
     errors: [],
   };
 
+  // Check for zero or negative
+  if (amount.lte(new BN(0))) {
+    result.safe = false;
+    result.errors.push('Deposit amount must be greater than zero');
+    return result;
+  }
+
   // Check minimum deposit
   const minDeposit = new BN(1_000_000_000); // 1 SOL
   if (amount.lt(minDeposit)) {
@@ -99,6 +114,14 @@ export function checkDepositAmount(amount: BN): SafetyCheckResult {
     );
   }
 
+  // Check for unusually large deposits (> 1,000 SOL)
+  const maxWarningDeposit = new BN(1_000_000_000_000); // 1,000 SOL
+  if (amount.gt(maxWarningDeposit)) {
+    result.warnings.push(
+      'Deposit amount is unusually large. Please verify the amount.'
+    );
+  }
+
   return result;
 }
 
@@ -109,11 +132,11 @@ export function calculateOpenInterest(portfolio: Portfolio): number {
   let totalOpenInterest = 0;
 
   // Sum up absolute values of all exposures
-  for (let i = 0; i < portfolio.exposure_count; i++) {
+  for (let i = 0; i < portfolio.exposureCount; i++) {
     const exposure = portfolio.exposures[i];
     if (exposure) {
-      // exposure[2] is the qty field (position_qty)
-      totalOpenInterest += Math.abs(Number(exposure[2]));
+      // exposure.positionQty is the position_qty field
+      totalOpenInterest += Math.abs(Number(exposure.positionQty));
     }
   }
 

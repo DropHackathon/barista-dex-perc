@@ -6,7 +6,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { loadKeypair } from '../../utils/wallet';
 import { createConnection, getNetworkConfig } from '../../utils/network';
-import { displaySuccess, displayError, formatSolWithSuffix } from '../../utils/display';
+import { displaySuccess, displayError, displayInfo, formatSolWithSuffix } from '../../utils/display';
 import { checkWithdrawalSafety, displaySafetyResults } from '../../utils/safety';
 
 interface WithdrawOptions {

@@ -29,7 +29,8 @@ export function formatPercent(value: number, decimals = 2): string {
  */
 export function formatPnl(pnl: BN | number | bigint | string, includeColor = true): string {
   const pnlNum = typeof pnl === 'number' ? pnl : Number(pnl.toString());
-  const formatted = `${pnlNum >= 0 ? '+' : ''}${formatSolWithSuffix(pnlNum)}`;
+  const sign = pnlNum > 0 ? '+' : pnlNum < 0 ? '' : '';
+  const formatted = `${sign}${formatSolWithSuffix(pnlNum)}`;
 
   if (!includeColor) return formatted;
 

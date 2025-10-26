@@ -164,7 +164,7 @@ describe('CLI E2E Tests', () => {
         await execAsync(cmd);
         fail('Should have thrown error');
       } catch (error: any) {
-        expect(error.stdout || error.stderr).toContain('greater than zero');
+        expect(error.stdout || error.stderr).toContain('greater than 0');
       }
     });
 

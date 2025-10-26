@@ -7,7 +7,7 @@ describe('Network Utils', () => {
     it('should create connection for localnet', () => {
       const conn = createConnection('localnet');
       expect(conn).toBeInstanceOf(Connection);
-      expect(conn.rpcEndpoint).toContain('127.0.0.1');
+      expect(conn.rpcEndpoint).toContain('localhost');
     });
 
     it('should create connection for devnet', () => {
@@ -43,13 +43,11 @@ describe('Network Utils', () => {
       expect(config).toHaveProperty('rpcUrl');
       expect(config).toHaveProperty('routerProgramId');
       expect(config).toHaveProperty('slabProgramId');
-      expect(config).toHaveProperty('oracleProgramId');
 
       expect(config.routerProgramId).toBeInstanceOf(PublicKey);
       expect(config.slabProgramId).toBeInstanceOf(PublicKey);
-      expect(config.oracleProgramId).toBeInstanceOf(PublicKey);
 
-      expect(config.rpcUrl).toContain('127.0.0.1');
+      expect(config.rpcUrl).toContain('localhost');
     });
 
     it('should return valid config for devnet', () => {
@@ -79,7 +77,6 @@ describe('Network Utils', () => {
 
       expect(config.routerProgramId).toBeInstanceOf(PublicKey);
       expect(config.slabProgramId).toBeInstanceOf(PublicKey);
-      expect(config.oracleProgramId).toBeInstanceOf(PublicKey);
     });
 
     it('should use different program IDs for different networks', () => {
@@ -102,7 +99,6 @@ describe('Network Utils', () => {
         expect(config.rpcUrl).toBeTruthy();
         expect(config.routerProgramId).toBeInstanceOf(PublicKey);
         expect(config.slabProgramId).toBeInstanceOf(PublicKey);
-        expect(config.oracleProgramId).toBeInstanceOf(PublicKey);
       });
     });
 

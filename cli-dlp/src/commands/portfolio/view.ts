@@ -72,10 +72,10 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
     const principal = equity - pnl;
 
     capitalTable.push(
-      ['Principal (Deposited)', formatSolWithSuffix(principal.toString())],
-      ['Realized PnL', formatPnl(pnl.toString())],
+      ['Principal (Deposited)', formatSolWithSuffix(principal)],
+      ['Realized PnL', formatPnl(pnl)],
       ['─────────────────────────────', '─────────────────────────────'],
-      [chalk.bold('Total Equity'), chalk.bold(formatSolWithSuffix(equity.toString()))]
+      [chalk.bold('Total Equity'), chalk.bold(formatSolWithSuffix(equity))]
     );
 
     console.log(capitalTable.toString());

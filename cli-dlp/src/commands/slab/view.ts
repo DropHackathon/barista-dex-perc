@@ -144,16 +144,20 @@ export async function viewSlabCommand(options: ViewSlabOptions): Promise<void> {
         },
       });
 
-      const bidPriceSol = Number(bestPrices.bid.price.toString()) / 1_000_000;
-      const askPriceSol = Number(bestPrices.ask.price.toString()) / 1_000_000;
-      const spreadSol = Number(bestPrices.spread.toString()) / 1_000_000;
-      const spreadBps = Number(bestPrices.spreadBps.toString()) / 100;
+      if (bestPrices.bid && bestPrices.ask && bestPrices.spread && bestPrices.spreadBps) {
+        const bidPriceSol = Number(bestPrices.bid.price.toString()) / 1_000_000;
+        const askPriceSol = Number(bestPrices.ask.price.toString()) / 1_000_000;
+        const spreadSol = Number(bestPrices.spread.toString()) / 1_000_000;
+        const spreadBps = Number(bestPrices.spreadBps.toString()) / 100;
 
-      pricesTable.push(
-        [chalk.green('Bid'), `$${bidPriceSol.toFixed(2)}`, bestPrices.bid.size.toString()],
-        [chalk.red('Ask'), `$${askPriceSol.toFixed(2)}`, bestPrices.ask.size.toString()],
-        ['Spread', `$${spreadSol.toFixed(2)} (${spreadBps.toFixed(2)} bps)`, '']
-      );
+        pricesTable.push(
+          [chalk.green('Bid'), `$${bidPriceSol.toFixed(2)}`, bestPrices.bid.size.toString()],
+          [chalk.red('Ask'), `$${askPriceSol.toFixed(2)}`, bestPrices.ask.size.toString()],
+          ['Spread', `$${spreadSol.toFixed(2)} (${spreadBps.toFixed(2)} bps)`, '']
+        );
+      } else {
+        pricesTable.push(['No prices available', '', '']);
+      }
 
       console.log(pricesTable.toString());
       console.log();

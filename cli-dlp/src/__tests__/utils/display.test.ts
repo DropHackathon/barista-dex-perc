@@ -108,13 +108,13 @@ describe('Display Utils', () => {
     it('should shorten long public keys', () => {
       const pubkey = '7EqQdEULxWcraVx3mXKFjc84LhCkMGZCkRuDpvcMwJeK';
       const result = formatPubkey(pubkey, 4);
-      expect(result).toBe('7EqQ...MwJeK');
+      expect(result).toBe('7EqQ...wJeK');
     });
 
     it('should use default 8 chars if not specified', () => {
       const pubkey = '7EqQdEULxWcraVx3mXKFjc84LhCkMGZCkRuDpvcMwJeK';
       const result = formatPubkey(pubkey);
-      expect(result).toBe('7EqQdEUL...DpvcMwJeK');
+      expect(result).toBe('7EqQdEUL...pvcMwJeK');
     });
 
     it('should return full string if shorter than threshold', () => {
