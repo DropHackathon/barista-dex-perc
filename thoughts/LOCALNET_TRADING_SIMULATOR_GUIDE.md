@@ -66,13 +66,11 @@ This guide walks through creating a fully functional trading simulator on Solana
 - Rust 1.70+
 - Solana CLI 1.16+
 - Node.js 18+
-- Anchor 0.28+
 
 # Verify installations
 rustc --version
 solana --version
 node --version
-anchor --version
 ```
 
 ### 2. Repository Setup
@@ -113,14 +111,23 @@ solana cluster-version
 
 Deploy the three core programs to localnet:
 
+### Build Programs
+
+First, build all the Solana programs:
+
+```bash
+# Build all programs (from repo root)
+./build-programs.sh
+
+# This builds router, slab, oracle, and amm programs
+# Output files will be in target/deploy/
+```
+
 ### Deploy Router Program
 
 ```bash
-cd programs/router
-
-# Build and deploy
-anchor build
-anchor deploy
+# Deploy router
+solana program deploy target/deploy/barista_router.so
 
 # Save the program ID
 # Output: Program Id: <ROUTER_PROGRAM_ID>
@@ -129,11 +136,8 @@ anchor deploy
 ### Deploy Slab Program
 
 ```bash
-cd ../slab
-
-# Build and deploy
-anchor build
-anchor deploy
+# Deploy slab
+solana program deploy target/deploy/barista_slab.so
 
 # Save the program ID
 # Output: Program Id: <SLAB_PROGRAM_ID>
@@ -142,11 +146,8 @@ anchor deploy
 ### Deploy Oracle Program
 
 ```bash
-cd ../oracle
-
-# Build and deploy
-anchor build
-anchor deploy
+# Deploy oracle
+solana program deploy target/deploy/barista_oracle.so
 
 # Save the program ID
 # Output: Program Id: <ORACLE_PROGRAM_ID>
@@ -285,40 +286,37 @@ barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
 
 ### 4.6: Initialize Oracle
 
+Use the keeper binary for oracle operations:
+
 ```bash
+# Build keeper if not already built
+cargo build --release --bin percolator-keeper
+
 # Set oracle program ID for convenience
-export BARISTA_ORACLE_PROGRAM_ID=<ORACLE_PROGRAM_ID>
+export BARISTA_ORACLE_PROGRAM=<ORACLE_PROGRAM_ID>
 
 # Initialize oracle for the instrument
-barista-dlp oracle:init \
+./target/release/percolator-keeper oracle init \
   --instrument <INSTRUMENT_ID> \
-  --initial-price 50000.00
-
-# Or use interactive mode:
-barista-dlp oracle:init
+  --price 50000 \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899
 
 # Expected output:
-# ═══════════════════════════════════════
-#        Oracle Initialization
-# ═══════════════════════════════════════
-# Oracle PDA:        8xR4tP...nZk3vL
-# Instrument:        BTC...PERP1
-# Initial Price:     $50,000.00
-# Authority:         <DLP_PUBKEY>
-# Bump:              255
-# ═══════════════════════════════════════
-#
 # ✓ Oracle initialized successfully!
 #   Oracle Address: 8xR4tP...nZk3vL
-#   Transaction: 3jD9qX...mYr8K
+#   Instrument: <INSTRUMENT_ID>
+#   Initial Price: $50,000.00
+#   Authority: <DLP_PUBKEY>
 #
 # ⚠ Save the oracle address!
-# Traders will need this address to verify prices.
 
 # Save the oracle address: <ORACLE_ADDRESS>
 
 # Verify oracle
-barista-dlp oracle:view --address <ORACLE_ADDRESS>
+./target/release/percolator-keeper oracle show \
+  --oracle <ORACLE_ADDRESS> \
+  --rpc-url http://localhost:8899
 ```
 
 **Your DLP setup is complete!** You now have:
@@ -653,26 +651,47 @@ barista-dlp slab:create \
 
 ### Simulate Price Movements
 
-Update oracle prices to simulate market movements:
+Update oracle prices to simulate market movements using the keeper:
 
 ```bash
 # Update oracle to $52,000 (as the DLP/authority)
-barista-dlp oracle:update \
-  --address <ORACLE_ADDRESS> \
-  --price 52000.00 \
-  --confidence 0.00
+./target/release/percolator-keeper oracle update \
+  --oracle <ORACLE_ADDRESS> \
+  --price 52000 \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899
 
 # Expected output:
 # ✓ Oracle price updated successfully!
 #   New Price:    $52,000.00
-#   Confidence:   ±$0.00
+#   Confidence:   ±$520.00 (default 0.1%)
 #   Transaction:  4kE8pN...qRt5M
 
-# Verify update (DLP)
-barista-dlp oracle:view --address <ORACLE_ADDRESS>
+# Verify update
+./target/release/percolator-keeper oracle show \
+  --oracle <ORACLE_ADDRESS> \
+  --rpc-url http://localhost:8899
 
 # Traders can also check the new price
 barista price --oracle <ORACLE_ADDRESS> --network localnet
+```
+
+### Automated Price Updates (Oracle Crank)
+
+For automated price updates from real market data:
+
+```bash
+# Start oracle crank (fetches from CoinGecko/Binance/Coinbase)
+./target/release/percolator-keeper oracle crank \
+  --oracle <ORACLE_ADDRESS> \
+  --instrument BTC/USD \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899 \
+  --interval 5 \
+  --source coingecko
+
+# Runs continuously, updating price every 5 seconds
+# Press Ctrl+C to stop
 ```
 
 ---
@@ -710,8 +729,10 @@ barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
 barista price --instrument <INSTRUMENT_ID> --network localnet
 barista price --oracle <ORACLE_ADDRESS> --network localnet
 
-# View oracle details with staleness warnings (DLP)
-barista-dlp oracle:view --address <ORACLE_ADDRESS>
+# View oracle details (using keeper)
+./target/release/percolator-keeper oracle show \
+  --oracle <ORACLE_ADDRESS> \
+  --rpc-url http://localhost:8899
 
 # Watch oracle price (updates every 5 seconds)
 watch -n 5 "barista price --oracle <ORACLE_ADDRESS> --network localnet"
@@ -757,9 +778,13 @@ barista sell --slab <SLAB> -q <QUANTITY> -p <PRICE> --keypair <KEYPAIR> --networ
 
 **Solution**: Redeploy programs
 ```bash
-cd programs/router && anchor deploy
-cd ../slab && anchor deploy
-cd ../oracle && anchor deploy
+# Build all programs (from repo root)
+./build-programs.sh
+
+# Deploy each program
+solana program deploy target/deploy/barista_router.so
+solana program deploy target/deploy/barista_slab.so
+solana program deploy target/deploy/barista_oracle.so
 ```
 
 ---
