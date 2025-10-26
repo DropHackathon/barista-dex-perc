@@ -49,10 +49,21 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       spinner.fail();
       console.log(chalk.yellow('\n⚠️  Portfolio not found\n'));
       console.log(chalk.gray('Your portfolio will be automatically created on first use.'));
-      console.log(chalk.gray('\nTo initialize your portfolio, use any of these commands:'));
-      console.log(chalk.cyan('  • barista deposit --mint <MINT> --amount <AMOUNT> --network ' + (options.network || 'mainnet-beta')));
-      console.log(chalk.cyan('  • barista buy --slab <SLAB> -q <QUANTITY> --network ' + (options.network || 'mainnet-beta')));
-      console.log(chalk.cyan('  • barista sell --slab <SLAB> -q <QUANTITY> --network ' + (options.network || 'mainnet-beta')));
+      console.log(chalk.gray('\nTo initialize your portfolio, try:'));
+
+      const network = options.network || 'mainnet-beta';
+
+      // Show different guidance based on network
+      if (network === 'localnet') {
+        console.log(chalk.cyan('  • barista deposit --mint <MINT> --amount <AMOUNT> --network localnet'));
+        console.log(chalk.gray('    (First create and mint test tokens with spl-token)'));
+      } else {
+        console.log(chalk.cyan('  • barista deposit --mint <MINT> --amount <AMOUNT> --network ' + network));
+        console.log(chalk.gray('    (Requires existing tokens in your wallet)'));
+      }
+
+      console.log(chalk.cyan('  • barista buy --slab <SLAB> -q <QUANTITY> --network ' + network));
+      console.log(chalk.cyan('  • barista sell --slab <SLAB> -q <QUANTITY> --network ' + network));
       console.log(chalk.gray('\nYour portfolio will be created automatically in the same transaction.\n'));
       process.exit(1);
     }
