@@ -2,6 +2,12 @@
 
 TypeScript SDK for interacting with Barista DEX on Solana, a fork of Percolator DEX by Toly
 
+> **For CLI Users:**
+> - **Traders**: Use [`@barista-dex/cli`](../cli-client/README.md) for trading operations
+> - **DLPs**: Use `@barista-dex/cli-dlp` (coming soon) for slab management and portfolio operations
+>
+> This SDK is for programmatic integration - building custom applications, bots, and integrations.
+
 ## Installation
 
 ```bash

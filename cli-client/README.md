@@ -1,6 +1,8 @@
-# Barista CLI
+# Barista CLI (Traders)
 
-Command-line interface for Barista DEX on Solana.
+Command-line interface for **traders** on Barista DEX.
+
+> **Note:** This CLI is for traders only. If you're a DLP (Decentralized Liquidity Provider), use the `cli-dlp` CLI for slab management and portfolio operations.
 
 ## Installation
 

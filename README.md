@@ -6,7 +6,21 @@ A formally-verified perpetual exchange protocol for Solana with O(1) crisis loss
 >
 > This code is provided for educational and research purposes only. It has not been audited for production use and should not be deployed to handle real funds. Use at your own risk.
 
-## Quick Start
+## For End Users
+
+### Traders
+Use the TypeScript CLI for trading operations:
+- **CLI**: [`cli-client`](cli-client/README.md) - Buy, sell, view portfolio, market data
+- **SDK**: [`@barista-dex/sdk`](sdk/README.md) - Build custom trading applications
+
+### DLPs (Liquidity Providers)
+Manage slabs and provide liquidity:
+- **CLI**: `cli-dlp` (coming soon) - Portfolio management, slab operations, analytics
+- **Current**: Use Keeper CLI (Rust) or SDK directly ([Setup Guide](thoughts/DLP_LOCALNET_SETUP_GUIDE.md))
+
+---
+
+## Quick Start (Developers)
 
 ```bash
 # Run all tests
