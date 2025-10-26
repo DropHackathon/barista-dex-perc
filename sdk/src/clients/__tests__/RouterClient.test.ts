@@ -7,7 +7,23 @@ import {
   LiquidationParams,
   BurnLpSharesParams,
   CancelLpOrdersParams,
+  VenueKind,
 } from '../../types/router';
+import {
+  serializeU64,
+  serializeU128,
+  serializeI64,
+  serializeI128,
+  serializeBool,
+  serializePubkey,
+} from '../../utils/serialization';
+import {
+  MAX_SLABS,
+  MAX_INSTRUMENTS,
+  MAX_LP_BUCKETS,
+  MAX_OPEN_ORDERS,
+  PORTFOLIO_SIZE,
+} from '../../constants';
 
 describe('RouterClient', () => {
   let connection: Connection;
@@ -451,6 +467,584 @@ describe('RouterClient', () => {
         const pos10x = client.calculateActualQuantity(maxInput, price, 10);
         expect(pos10x.toString()).toBe('1000');
       });
+    });
+  });
+
+  describe('Portfolio Deserialization', () => {
+    /**
+     * Helper: Create a mock portfolio buffer matching on-chain layout
+     */
+    function createPortfolioBuffer(fields: {
+      routerId?: PublicKey;
+      user?: PublicKey;
+      equity?: BN;
+      im?: BN;
+      mm?: BN;
+      freeCollateral?: BN;
+      lastMarkTs?: BN;
+      exposureCount?: number;
+      bump?: number;
+      health?: BN;
+      lastLiquidationTs?: BN;
+      cooldownSeconds?: BN;
+      principal?: BN;
+      pnl?: BN;
+      vestedPnl?: BN;
+      lastSlot?: BN;
+      pnlIndexCheckpoint?: BN;
+      exposures?: Array<{ slabIndex: number; instrumentIndex: number; positionQty: BN }>;
+      lpBuckets?: Array<{
+        marketId: PublicKey;
+        venueKind: VenueKind;
+        hasAmm: boolean;
+        amm?: { lpShares: BN; sharePriceCached: BN; lastUpdateTs: BN };
+        hasSlab: boolean;
+        slab?: {
+          reservedQuote: BN;
+          reservedBase: BN;
+          openOrderCount: number;
+          openOrderIds: BN[];
+        };
+        im: BN;
+        mm: BN;
+        active: boolean;
+      }>;
+    }): Buffer {
+      const buffer = Buffer.alloc(PORTFOLIO_SIZE);
+      let offset = 0;
+
+      // Discriminator (8 bytes) - using a mock value
+      buffer.writeBigUInt64LE(BigInt(0x1234567890abcdef), offset);
+      offset += 8;
+
+      // Identity
+      serializePubkey(fields.routerId || PublicKey.default).copy(buffer, offset);
+      offset += 32;
+      serializePubkey(fields.user || PublicKey.default).copy(buffer, offset);
+      offset += 32;
+
+      // Cross-margin state
+      serializeI128(fields.equity || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeU128(fields.im || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeU128(fields.mm || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeI128(fields.freeCollateral || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeU64(fields.lastMarkTs || new BN(0)).copy(buffer, offset);
+      offset += 8;
+      buffer.writeUInt16LE(fields.exposureCount || 0, offset);
+      offset += 2;
+      buffer.writeUInt8(fields.bump || 0, offset);
+      offset += 1;
+      offset += 5; // _padding
+
+      // Liquidation tracking
+      serializeI128(fields.health || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeU64(fields.lastLiquidationTs || new BN(0)).copy(buffer, offset);
+      offset += 8;
+      serializeU64(fields.cooldownSeconds || new BN(0)).copy(buffer, offset);
+      offset += 8;
+      offset += 8; // _padding2
+
+      // PnL vesting
+      serializeI128(fields.principal || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeI128(fields.pnl || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeI128(fields.vestedPnl || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      serializeU64(fields.lastSlot || new BN(0)).copy(buffer, offset);
+      offset += 8;
+      serializeI128(fields.pnlIndexCheckpoint || new BN(0)).copy(buffer, offset);
+      offset += 16;
+      offset += 8; // _padding4
+
+      // Exposures array (MAX_SLABS * MAX_INSTRUMENTS)
+      const exposureSet = new Map<string, BN>();
+      if (fields.exposures) {
+        for (const exp of fields.exposures) {
+          const key = `${exp.slabIndex},${exp.instrumentIndex}`;
+          exposureSet.set(key, exp.positionQty);
+        }
+      }
+
+      for (let slabIdx = 0; slabIdx < MAX_SLABS; slabIdx++) {
+        for (let instIdx = 0; instIdx < MAX_INSTRUMENTS; instIdx++) {
+          const key = `${slabIdx},${instIdx}`;
+          const positionQty = exposureSet.get(key) || new BN(0);
+
+          buffer.writeUInt16LE(slabIdx, offset);
+          offset += 2;
+          buffer.writeUInt16LE(instIdx, offset);
+          offset += 2;
+          serializeI64(positionQty).copy(buffer, offset);
+          offset += 8;
+        }
+      }
+
+      // LP Buckets array (MAX_LP_BUCKETS)
+      for (let i = 0; i < MAX_LP_BUCKETS; i++) {
+        const bucket = fields.lpBuckets?.[i];
+
+        // VenueId (40 bytes)
+        serializePubkey(bucket?.marketId || PublicKey.default).copy(buffer, offset);
+        offset += 32;
+        buffer.writeUInt8(bucket?.venueKind ?? VenueKind.Slab, offset);
+        offset += 1;
+        offset += 7; // _padding
+
+        // Option<AmmLp>
+        const hasAmm = bucket?.hasAmm ?? false;
+        buffer.writeUInt8(hasAmm ? 1 : 0, offset);
+        offset += 1;
+        if (hasAmm && bucket?.amm) {
+          serializeU64(bucket.amm.lpShares).copy(buffer, offset);
+          offset += 8;
+          serializeI64(bucket.amm.sharePriceCached).copy(buffer, offset);
+          offset += 8;
+          serializeU64(bucket.amm.lastUpdateTs).copy(buffer, offset);
+          offset += 8;
+          offset += 8; // _padding
+        } else {
+          offset += 32; // Skip AmmLp size
+        }
+
+        // Option<SlabLp>
+        const hasSlab = bucket?.hasSlab ?? false;
+        buffer.writeUInt8(hasSlab ? 1 : 0, offset);
+        offset += 1;
+        if (hasSlab && bucket?.slab) {
+          serializeU128(bucket.slab.reservedQuote).copy(buffer, offset);
+          offset += 16;
+          serializeU128(bucket.slab.reservedBase).copy(buffer, offset);
+          offset += 16;
+          buffer.writeUInt16LE(bucket.slab.openOrderCount, offset);
+          offset += 2;
+          offset += 6; // _padding
+          for (let j = 0; j < MAX_OPEN_ORDERS; j++) {
+            const orderId = bucket.slab.openOrderIds[j] || new BN(0);
+            serializeU64(orderId).copy(buffer, offset);
+            offset += 8;
+          }
+        } else {
+          offset += 16 + 16 + 2 + 6 + 8 * MAX_OPEN_ORDERS;
+        }
+
+        // Final bucket fields
+        serializeU128(bucket?.im || new BN(0)).copy(buffer, offset);
+        offset += 16;
+        serializeU128(bucket?.mm || new BN(0)).copy(buffer, offset);
+        offset += 16;
+        buffer.writeUInt8(bucket?.active ? 1 : 0, offset);
+        offset += 1;
+        offset += 7; // _padding
+      }
+
+      return buffer;
+    }
+
+    it('should deserialize empty portfolio correctly', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        bump: 255,
+      });
+
+      // Mock getAccountInfo to return our buffer
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio).toBeDefined();
+      expect(portfolio!.routerId.equals(routerId)).toBe(true);
+      expect(portfolio!.user.equals(user)).toBe(true);
+      expect(portfolio!.bump).toBe(255);
+      expect(portfolio!.equity.toString()).toBe('0');
+      expect(portfolio!.im.toString()).toBe('0');
+      expect(portfolio!.mm.toString()).toBe('0');
+      expect(portfolio!.exposures.length).toBe(0);
+      expect(portfolio!.lpBuckets.length).toBe(0);
+    });
+
+    it('should deserialize portfolio with positive equity and collateral', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const equity = new BN(1000000000); // 1000 USDC (scaled)
+      const im = new BN(200000000); // 200 USDC
+      const mm = new BN(100000000); // 100 USDC
+      const freeCollateral = new BN(800000000); // 800 USDC
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        equity,
+        im,
+        mm,
+        freeCollateral,
+        bump: 254,
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.equity.toString()).toBe(equity.toString());
+      expect(portfolio!.im.toString()).toBe(im.toString());
+      expect(portfolio!.mm.toString()).toBe(mm.toString());
+      expect(portfolio!.freeCollateral.toString()).toBe(freeCollateral.toString());
+    });
+
+    it('should deserialize portfolio with negative PnL', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const principal = new BN(1000000000); // 1000 USDC deposited
+      const pnl = new BN(-50000000); // -50 USDC unrealized loss
+      const vestedPnl = new BN(-30000000); // -30 USDC vested
+      const equity = principal.add(pnl); // 950 USDC
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        equity,
+        principal,
+        pnl,
+        vestedPnl,
+        lastSlot: new BN(123456),
+        bump: 253,
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.principal.toString()).toBe(principal.toString());
+      expect(portfolio!.pnl.isNeg()).toBe(true);
+      expect(portfolio!.pnl.toString()).toBe(pnl.toString());
+      expect(portfolio!.vestedPnl.toString()).toBe(vestedPnl.toString());
+      expect(portfolio!.equity.toString()).toBe(equity.toString());
+      expect(portfolio!.lastSlot.toString()).toBe('123456');
+    });
+
+    it('should deserialize portfolio with exposures', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        exposureCount: 3,
+        bump: 252,
+        exposures: [
+          { slabIndex: 0, instrumentIndex: 0, positionQty: new BN(1000000) },
+          { slabIndex: 0, instrumentIndex: 1, positionQty: new BN(-500000) },
+          { slabIndex: 5, instrumentIndex: 10, positionQty: new BN(2000000) },
+        ],
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.exposures.length).toBe(3);
+
+      const exp1 = portfolio!.exposures.find(
+        (e) => e.slabIndex === 0 && e.instrumentIndex === 0
+      );
+      expect(exp1).toBeDefined();
+      expect(exp1!.positionQty.toString()).toBe('1000000');
+
+      const exp2 = portfolio!.exposures.find(
+        (e) => e.slabIndex === 0 && e.instrumentIndex === 1
+      );
+      expect(exp2).toBeDefined();
+      expect(exp2!.positionQty.isNeg()).toBe(true);
+      expect(exp2!.positionQty.toString()).toBe('-500000');
+
+      const exp3 = portfolio!.exposures.find(
+        (e) => e.slabIndex === 5 && e.instrumentIndex === 10
+      );
+      expect(exp3).toBeDefined();
+      expect(exp3!.positionQty.toString()).toBe('2000000');
+    });
+
+    it('should deserialize portfolio with AMM LP bucket', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const marketId = PublicKey.unique();
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        bump: 251,
+        lpBuckets: [
+          {
+            marketId,
+            venueKind: VenueKind.Amm,
+            hasAmm: true,
+            amm: {
+              lpShares: new BN(5000000),
+              sharePriceCached: new BN(1050000),
+              lastUpdateTs: new BN(Date.now() / 1000),
+            },
+            hasSlab: false,
+            im: new BN(100000),
+            mm: new BN(50000),
+            active: true,
+          },
+        ],
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.lpBuckets.length).toBe(1);
+
+      const bucket = portfolio!.lpBuckets[0];
+      expect(bucket.venue.marketId.equals(marketId)).toBe(true);
+      expect(bucket.venue.venueKind).toBe(VenueKind.Amm);
+      expect(bucket.amm).toBeDefined();
+      expect(bucket.amm!.lpShares.toString()).toBe('5000000');
+      expect(bucket.amm!.sharePriceCached.toString()).toBe('1050000');
+      expect(bucket.slab).toBeNull();
+      expect(bucket.im.toString()).toBe('100000');
+      expect(bucket.mm.toString()).toBe('50000');
+      expect(bucket.active).toBe(true);
+    });
+
+    it('should deserialize portfolio with Slab LP bucket', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const marketId = PublicKey.unique();
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        bump: 250,
+        lpBuckets: [
+          {
+            marketId,
+            venueKind: VenueKind.Slab,
+            hasAmm: false,
+            hasSlab: true,
+            slab: {
+              reservedQuote: new BN(10000000),
+              reservedBase: new BN(5000000),
+              openOrderCount: 3,
+              openOrderIds: [new BN(101), new BN(102), new BN(103)],
+            },
+            im: new BN(200000),
+            mm: new BN(100000),
+            active: true,
+          },
+        ],
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.lpBuckets.length).toBe(1);
+
+      const bucket = portfolio!.lpBuckets[0];
+      expect(bucket.venue.marketId.equals(marketId)).toBe(true);
+      expect(bucket.venue.venueKind).toBe(VenueKind.Slab);
+      expect(bucket.amm).toBeNull();
+      expect(bucket.slab).toBeDefined();
+      expect(bucket.slab!.reservedQuote.toString()).toBe('10000000');
+      expect(bucket.slab!.reservedBase.toString()).toBe('5000000');
+      expect(bucket.slab!.openOrderCount).toBe(3);
+      expect(bucket.slab!.openOrderIds.length).toBe(3);
+      expect(bucket.slab!.openOrderIds[0].toString()).toBe('101');
+      expect(bucket.slab!.openOrderIds[1].toString()).toBe('102');
+      expect(bucket.slab!.openOrderIds[2].toString()).toBe('103');
+    });
+
+    it('should deserialize complex portfolio with multiple exposures and LP buckets', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const market1 = PublicKey.unique();
+      const market2 = PublicKey.unique();
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        equity: new BN(5000000000),
+        im: new BN(1000000000),
+        mm: new BN(500000000),
+        freeCollateral: new BN(4000000000),
+        exposureCount: 4,
+        bump: 249,
+        health: new BN(2000000000),
+        principal: new BN(4500000000),
+        pnl: new BN(500000000),
+        vestedPnl: new BN(300000000),
+        lastSlot: new BN(999999),
+        exposures: [
+          { slabIndex: 0, instrumentIndex: 0, positionQty: new BN(10000000) },
+          { slabIndex: 0, instrumentIndex: 1, positionQty: new BN(-5000000) },
+          { slabIndex: 1, instrumentIndex: 0, positionQty: new BN(3000000) },
+          { slabIndex: 2, instrumentIndex: 5, positionQty: new BN(1000000) },
+        ],
+        lpBuckets: [
+          {
+            marketId: market1,
+            venueKind: VenueKind.Amm,
+            hasAmm: true,
+            amm: {
+              lpShares: new BN(8000000),
+              sharePriceCached: new BN(1100000),
+              lastUpdateTs: new BN(1234567890),
+            },
+            hasSlab: false,
+            im: new BN(300000),
+            mm: new BN(150000),
+            active: true,
+          },
+          {
+            marketId: market2,
+            venueKind: VenueKind.Slab,
+            hasAmm: false,
+            hasSlab: true,
+            slab: {
+              reservedQuote: new BN(20000000),
+              reservedBase: new BN(15000000),
+              openOrderCount: 5,
+              openOrderIds: [
+                new BN(201),
+                new BN(202),
+                new BN(203),
+                new BN(204),
+                new BN(205),
+              ],
+            },
+            im: new BN(400000),
+            mm: new BN(200000),
+            active: true,
+          },
+        ],
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      // Verify core fields
+      expect(portfolio!.equity.toString()).toBe('5000000000');
+      expect(portfolio!.im.toString()).toBe('1000000000');
+      expect(portfolio!.mm.toString()).toBe('500000000');
+      expect(portfolio!.freeCollateral.toString()).toBe('4000000000');
+      expect(portfolio!.health.toString()).toBe('2000000000');
+      expect(portfolio!.principal.toString()).toBe('4500000000');
+      expect(portfolio!.pnl.toString()).toBe('500000000');
+      expect(portfolio!.vestedPnl.toString()).toBe('300000000');
+
+      // Verify exposures
+      expect(portfolio!.exposures.length).toBe(4);
+
+      // Verify LP buckets
+      expect(portfolio!.lpBuckets.length).toBe(2);
+
+      const ammBucket = portfolio!.lpBuckets.find(
+        (b) => b.venue.venueKind === VenueKind.Amm
+      );
+      expect(ammBucket).toBeDefined();
+      expect(ammBucket!.amm).toBeDefined();
+      expect(ammBucket!.amm!.lpShares.toString()).toBe('8000000');
+
+      const slabBucket = portfolio!.lpBuckets.find(
+        (b) => b.venue.venueKind === VenueKind.Slab
+      );
+      expect(slabBucket).toBeDefined();
+      expect(slabBucket!.slab).toBeDefined();
+      expect(slabBucket!.slab!.openOrderIds.length).toBe(5);
+    });
+
+    it('should handle portfolio with liquidation tracking fields', async () => {
+      const routerId = PublicKey.unique();
+      const user = PublicKey.unique();
+      const now = Math.floor(Date.now() / 1000);
+
+      const buffer = createPortfolioBuffer({
+        routerId,
+        user,
+        equity: new BN(100000000), // Low equity
+        health: new BN(-10000000), // Negative health (underwater)
+        lastLiquidationTs: new BN(now - 3600), // Liquidated 1hr ago
+        cooldownSeconds: new BN(86400), // 24hr cooldown
+        bump: 248,
+      });
+
+      const mockAccountInfo = {
+        data: buffer,
+        executable: false,
+        lamports: 1000000,
+        owner: programId,
+      };
+
+      jest.spyOn(connection, 'getAccountInfo').mockResolvedValue(mockAccountInfo);
+
+      const portfolio = await client.getPortfolio(user);
+
+      expect(portfolio!.health.isNeg()).toBe(true);
+      expect(portfolio!.health.toString()).toBe('-10000000');
+      expect(portfolio!.lastLiquidationTs.toString()).toBe((now - 3600).toString());
+      expect(portfolio!.cooldownSeconds.toString()).toBe('86400');
     });
   });
 });

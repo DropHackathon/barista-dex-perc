@@ -17,6 +17,12 @@ import {
   LiquidationParams,
   BurnLpSharesParams,
   CancelLpOrdersParams,
+  Exposure,
+  VenueId,
+  VenueKind,
+  AmmLp,
+  SlabLp,
+  LpBucket,
 } from '../types/router';
 import {
   SlabInfo,
@@ -28,10 +34,18 @@ import {
   serializeBool,
   serializePubkey,
   createInstructionData,
+  deserializeU64,
   deserializeU128,
   deserializeI64,
+  deserializeI128,
   deserializePubkey,
 } from '../utils/serialization';
+import {
+  MAX_SLABS,
+  MAX_INSTRUMENTS,
+  MAX_LP_BUCKETS,
+  MAX_OPEN_ORDERS,
+} from '../constants';
 
 /**
  * Client for interacting with the Barista DEX Router program
@@ -713,37 +727,290 @@ export class RouterClient {
   // Deserialization Methods
   // ============================================================================
 
+  /**
+   * Deserialize Portfolio account data
+   *
+   * CRITICAL: This must match the exact on-chain layout!
+   * Layout reference: programs/router/src/state/portfolio.rs
+   *
+   * @param data Raw account data from Solana
+   * @returns Deserialized Portfolio object
+   */
   private deserializePortfolio(data: Buffer): Portfolio {
-    let offset = 8; // Skip discriminator
+    let offset = 0;
 
-    const owner = deserializePubkey(data, offset);
+    // Skip discriminator (8 bytes)
+    // In Anchor/Borsh, accounts start with 8-byte discriminator
+    offset += 8;
+
+    // ===== Identity Fields =====
+
+    // router_id: Pubkey (32 bytes)
+    const routerId = deserializePubkey(data, offset);
     offset += 32;
 
-    const collateralValue = deserializeU128(data, offset);
+    // user: Pubkey (32 bytes)
+    const user = deserializePubkey(data, offset);
+    offset += 32;
+
+    // ===== Cross-Margin State =====
+
+    // equity: i128 (16 bytes)
+    const equity = deserializeI128(data, offset);
     offset += 16;
 
-    const maintMargin = deserializeU128(data, offset);
+    // im: u128 (16 bytes)
+    const im = deserializeU128(data, offset);
     offset += 16;
 
-    const unrealizedPnl = deserializeI64(data, offset);
+    // mm: u128 (16 bytes)
+    const mm = deserializeU128(data, offset);
+    offset += 16;
+
+    // free_collateral: i128 (16 bytes)
+    const freeCollateral = deserializeI128(data, offset);
+    offset += 16;
+
+    // last_mark_ts: u64 (8 bytes)
+    const lastMarkTs = deserializeU64(data, offset);
     offset += 8;
 
-    const equity = deserializeU128(data, offset);
+    // exposure_count: u16 (2 bytes)
+    const exposureCount = data.readUInt16LE(offset);
+    offset += 2;
+
+    // bump: u8 (1 byte)
+    const bump = data.readUInt8(offset);
+    offset += 1;
+
+    // _padding: [u8; 5]
+    offset += 5;
+
+    // ===== Liquidation Tracking =====
+
+    // health: i128 (16 bytes)
+    const health = deserializeI128(data, offset);
     offset += 16;
 
-    const health = deserializeI64(data, offset);
+    // last_liquidation_ts: u64 (8 bytes)
+    const lastLiquidationTs = deserializeU64(data, offset);
     offset += 8;
 
-    const lastUpdate = deserializeU128(data, offset);
+    // cooldown_seconds: u64 (8 bytes)
+    const cooldownSeconds = deserializeU64(data, offset);
+    offset += 8;
+
+    // _padding2: [u8; 8]
+    offset += 8;
+
+    // ===== PnL Vesting State =====
+
+    // principal: i128 (16 bytes)
+    const principal = deserializeI128(data, offset);
+    offset += 16;
+
+    // pnl: i128 (16 bytes)
+    const pnl = deserializeI128(data, offset);
+    offset += 16;
+
+    // vested_pnl: i128 (16 bytes)
+    const vestedPnl = deserializeI128(data, offset);
+    offset += 16;
+
+    // last_slot: u64 (8 bytes)
+    const lastSlot = deserializeU64(data, offset);
+    offset += 8;
+
+    // pnl_index_checkpoint: i128 (16 bytes)
+    const pnlIndexCheckpoint = deserializeI128(data, offset);
+    offset += 16;
+
+    // _padding4: [u8; 8]
+    offset += 8;
+
+    // ===== Exposures Array =====
+    // exposures: [(u16, u16, i64); MAX_SLABS * MAX_INSTRUMENTS]
+
+    const exposures: Exposure[] = [];
+    const maxExposures = MAX_SLABS * MAX_INSTRUMENTS;
+
+    for (let i = 0; i < maxExposures; i++) {
+      // slab_index: u16 (2 bytes)
+      const slabIndex = data.readUInt16LE(offset);
+      offset += 2;
+
+      // instrument_index: u16 (2 bytes)
+      const instrumentIndex = data.readUInt16LE(offset);
+      offset += 2;
+
+      // position_qty: i64 (8 bytes)
+      const positionQty = deserializeI64(data, offset);
+      offset += 8;
+
+      // Only include non-zero positions
+      if (!positionQty.isZero()) {
+        exposures.push({
+          slabIndex,
+          instrumentIndex,
+          positionQty,
+        });
+      }
+    }
+
+    // ===== LP Buckets Array =====
+    // lp_buckets: [LpBucket; MAX_LP_BUCKETS]
+
+    const lpBuckets: LpBucket[] = [];
+
+    for (let i = 0; i < MAX_LP_BUCKETS; i++) {
+      // venue: VenueId (40 bytes total)
+      // market_id: Pubkey (32 bytes)
+      const marketId = deserializePubkey(data, offset);
+      offset += 32;
+
+      // venue_kind: VenueKind (1 byte)
+      const venueKind = data.readUInt8(offset) as VenueKind;
+      offset += 1;
+
+      // _padding: [u8; 7]
+      offset += 7;
+
+      const venue: VenueId = {
+        marketId,
+        venueKind,
+      };
+
+      // amm: Option<AmmLp>
+      // Option discriminator (1 byte): 0 = None, 1 = Some
+      const hasAmm = data.readUInt8(offset) === 1;
+      offset += 1;
+
+      let amm: AmmLp | null = null;
+      if (hasAmm) {
+        // lp_shares: u64 (8 bytes)
+        const lpShares = deserializeU64(data, offset);
+        offset += 8;
+
+        // share_price_cached: i64 (8 bytes)
+        const sharePriceCached = deserializeI64(data, offset);
+        offset += 8;
+
+        // last_update_ts: u64 (8 bytes)
+        const lastUpdateTs = deserializeU64(data, offset);
+        offset += 8;
+
+        // _padding: [u8; 8]
+        offset += 8;
+
+        amm = {
+          lpShares,
+          sharePriceCached,
+          lastUpdateTs,
+        };
+      } else {
+        // Skip AmmLp size (8 + 8 + 8 + 8 = 32 bytes)
+        offset += 32;
+      }
+
+      // slab: Option<SlabLp>
+      const hasSlab = data.readUInt8(offset) === 1;
+      offset += 1;
+
+      let slab: SlabLp | null = null;
+      if (hasSlab) {
+        // reserved_quote: u128 (16 bytes)
+        const reservedQuote = deserializeU128(data, offset);
+        offset += 16;
+
+        // reserved_base: u128 (16 bytes)
+        const reservedBase = deserializeU128(data, offset);
+        offset += 16;
+
+        // open_order_count: u16 (2 bytes)
+        const openOrderCount = data.readUInt16LE(offset);
+        offset += 2;
+
+        // _padding: [u8; 6]
+        offset += 6;
+
+        // open_order_ids: [u64; MAX_OPEN_ORDERS]
+        const openOrderIds: BN[] = [];
+        for (let j = 0; j < MAX_OPEN_ORDERS; j++) {
+          const orderId = deserializeU64(data, offset);
+          offset += 8;
+          if (!orderId.isZero()) {
+            openOrderIds.push(orderId);
+          }
+        }
+
+        slab = {
+          reservedQuote,
+          reservedBase,
+          openOrderCount,
+          openOrderIds,
+        };
+      } else {
+        // Skip SlabLp size (16 + 16 + 2 + 6 + (8 * MAX_OPEN_ORDERS) bytes)
+        offset += 16 + 16 + 2 + 6 + (8 * MAX_OPEN_ORDERS);
+      }
+
+      // im: u128 (16 bytes)
+      const lpIm = deserializeU128(data, offset);
+      offset += 16;
+
+      // mm: u128 (16 bytes)
+      const lpMm = deserializeU128(data, offset);
+      offset += 16;
+
+      // active: bool (1 byte)
+      const active = data.readUInt8(offset) === 1;
+      offset += 1;
+
+      // _padding: [u8; 7]
+      offset += 7;
+
+      // Only include active buckets
+      if (active && (!lpIm.isZero() || !lpMm.isZero() || amm !== null || slab !== null)) {
+        lpBuckets.push({
+          venue,
+          amm,
+          slab,
+          im: lpIm,
+          mm: lpMm,
+          active,
+        });
+      }
+    }
+
+    // lp_bucket_count: u16 (2 bytes)
+    // Note: This is at the end of the struct, after all lp_buckets
+    // We don't strictly need it since we filter by active flag above
+    // but we can read it for validation
+    // offset += 2; // Commented out - we derive this from active buckets
+
+    // _padding3: [u8; 6]
+    // offset += 6;
 
     return {
-      owner,
-      collateralValue,
-      maintMargin,
-      unrealizedPnl,
+      routerId,
+      user,
       equity,
+      im,
+      mm,
+      freeCollateral,
+      lastMarkTs,
+      exposureCount,
+      bump,
       health,
-      lastUpdate,
+      lastLiquidationTs,
+      cooldownSeconds,
+      principal,
+      pnl,
+      vestedPnl,
+      lastSlot,
+      pnlIndexCheckpoint,
+      exposures,
+      lpBuckets,
     };
   }
 

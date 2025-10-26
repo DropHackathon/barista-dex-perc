@@ -58,20 +58,100 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
 
     const summaryTable = new Table({
       head: ['Metric', 'Value'],
-      colWidths: [25, 30],
+      colWidths: [30, 35],
     });
 
     summaryTable.push(
-      ['Owner', formatPublicKey(portfolio.owner.toBase58())],
+      ['User', formatPublicKey(portfolio.user.toBase58())],
+      ['Router ID', formatPublicKey(portfolio.routerId.toBase58())],
+      ['Bump', portfolio.bump.toString()],
+      ['', ''],
+      [chalk.bold('💰 Balance'), ''],
       ['Equity', formatAmount(portfolio.equity)],
-      ['Collateral Value', formatAmount(portfolio.collateralValue)],
-      ['Maint Margin', formatAmount(portfolio.maintMargin)],
-      ['Unrealized PnL', formatAmount(portfolio.unrealizedPnl)],
+      ['Principal (Deposits)', formatAmount(portfolio.principal)],
+      ['Free Collateral', formatAmount(portfolio.freeCollateral)],
+      ['', ''],
+      [chalk.bold('📈 PnL & Vesting'), ''],
+      ['Unrealized PnL', formatAmount(portfolio.pnl)],
+      ['Vested PnL', formatAmount(portfolio.vestedPnl)],
+      ['PnL Index Checkpoint', formatAmount(portfolio.pnlIndexCheckpoint)],
+      ['Last Slot', portfolio.lastSlot.toString()],
+      ['', ''],
+      [chalk.bold('🛡️  Margin & Risk'), ''],
+      ['Initial Margin (IM)', formatAmount(portfolio.im)],
+      ['Maintenance Margin (MM)', formatAmount(portfolio.mm)],
       ['Health', formatAmount(portfolio.health)],
-      ['Last Update', portfolio.lastUpdate.toString()]
+      ['Last Mark Timestamp', portfolio.lastMarkTs.toString()],
+      ['', ''],
+      [chalk.bold('⚠️  Liquidation'), ''],
+      ['Last Liquidation Ts', portfolio.lastLiquidationTs.toString()],
+      ['Cooldown (seconds)', portfolio.cooldownSeconds.toString()],
+      ['', ''],
+      [chalk.bold('📍 Positions & LP'), ''],
+      ['Active Exposures', portfolio.exposureCount.toString()],
+      ['Active LP Buckets', portfolio.lpBuckets.length.toString()]
     );
 
     console.log(summaryTable.toString());
+
+    // Display exposures if any
+    if (portfolio.exposures.length > 0) {
+      console.log(chalk.bold('\n📍 Trading Positions\n'));
+
+      const exposuresTable = new Table({
+        head: ['Slab', 'Instrument', 'Position Qty'],
+        colWidths: [10, 15, 20],
+      });
+
+      for (const exp of portfolio.exposures) {
+        exposuresTable.push([
+          exp.slabIndex.toString(),
+          exp.instrumentIndex.toString(),
+          formatAmount(exp.positionQty),
+        ]);
+      }
+
+      console.log(exposuresTable.toString());
+    }
+
+    // Display LP buckets if any
+    if (portfolio.lpBuckets.length > 0) {
+      console.log(chalk.bold('\n💧 Liquidity Provider Positions\n'));
+
+      const lpTable = new Table({
+        head: ['Market ID', 'Venue', 'Type', 'Value', 'IM', 'MM'],
+        colWidths: [12, 8, 10, 20, 15, 15],
+      });
+
+      for (const bucket of portfolio.lpBuckets) {
+        const venueKind = bucket.venue.venueKind === 0 ? 'Slab' : 'AMM';
+        const marketId = formatPublicKey(bucket.venue.marketId.toBase58());
+
+        if (bucket.amm) {
+          lpTable.push([
+            marketId,
+            venueKind,
+            'AMM LP',
+            `${formatAmount(bucket.amm.lpShares)} shares`,
+            formatAmount(bucket.im),
+            formatAmount(bucket.mm),
+          ]);
+        }
+
+        if (bucket.slab) {
+          lpTable.push([
+            marketId,
+            venueKind,
+            'Slab LP',
+            `${bucket.slab.openOrderCount} orders`,
+            formatAmount(bucket.im),
+            formatAmount(bucket.mm),
+          ]);
+        }
+      }
+
+      console.log(lpTable.toString());
+    }
   } catch (error: any) {
     spinner.fail();
     displayError(`Failed to fetch portfolio: ${error.message}`);

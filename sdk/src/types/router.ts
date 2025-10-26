@@ -16,16 +16,98 @@ export enum RouterInstruction {
 }
 
 /**
+ * Exposure: (slab_index, instrument_index, position_qty)
+ * Represents a trader position in a specific instrument on a specific slab
+ */
+export interface Exposure {
+  slabIndex: number;          // u16
+  instrumentIndex: number;    // u16
+  positionQty: BN;            // i64
+}
+
+/**
+ * Venue kind enum
+ */
+export enum VenueKind {
+  Slab = 0,
+  Amm = 1,
+}
+
+/**
+ * Venue identifier
+ * Struct layout: market_id (32 bytes) + venue_kind (1 byte) + padding (7 bytes)
+ */
+export interface VenueId {
+  marketId: PublicKey;
+  venueKind: VenueKind;
+}
+
+/**
+ * AMM LP share tracking
+ */
+export interface AmmLp {
+  lpShares: BN;               // u64
+  sharePriceCached: BN;       // i64
+  lastUpdateTs: BN;           // u64
+}
+
+/**
+ * Slab LP order reservation tracking
+ */
+export interface SlabLp {
+  reservedQuote: BN;          // u128
+  reservedBase: BN;           // u128
+  openOrderCount: number;     // u16
+  openOrderIds: BN[];         // [u64; MAX_OPEN_ORDERS]
+}
+
+/**
+ * LP Bucket: venue-scoped liquidity provider exposure
+ */
+export interface LpBucket {
+  venue: VenueId;
+  amm: AmmLp | null;          // Option<AmmLp>
+  slab: SlabLp | null;        // Option<SlabLp>
+  im: BN;                     // u128
+  mm: BN;                     // u128
+  active: boolean;            // bool
+}
+
+/**
  * Portfolio account structure
+ *
+ * IMPORTANT: This must match the on-chain layout exactly!
+ * Source: programs/router/src/state/portfolio.rs
  */
 export interface Portfolio {
-  owner: PublicKey;
-  collateralValue: BN;
-  maintMargin: BN;
-  unrealizedPnl: BN;
-  equity: BN;
-  health: BN;
-  lastUpdate: BN;
+  // Identity
+  routerId: PublicKey;        // 32 bytes
+  user: PublicKey;            // 32 bytes
+
+  // Cross-margin state
+  equity: BN;                 // i128 (16 bytes)
+  im: BN;                     // u128 (16 bytes) - Initial Margin
+  mm: BN;                     // u128 (16 bytes) - Maintenance Margin
+  freeCollateral: BN;         // i128 (16 bytes)
+  lastMarkTs: BN;             // u64 (8 bytes)
+  exposureCount: number;      // u16 (2 bytes)
+  bump: number;               // u8 (1 byte)
+
+  // Liquidation tracking
+  health: BN;                 // i128 (16 bytes) = equity - mm
+  lastLiquidationTs: BN;      // u64 (8 bytes)
+  cooldownSeconds: BN;        // u64 (8 bytes)
+
+  // PnL vesting state
+  principal: BN;              // i128 (16 bytes) - deposits - withdrawals
+  pnl: BN;                    // i128 (16 bytes) - current unrealized PnL
+  vestedPnl: BN;              // i128 (16 bytes) - vested portion
+  lastSlot: BN;               // u64 (8 bytes)
+  pnlIndexCheckpoint: BN;     // i128 (16 bytes)
+
+  // Dynamic arrays
+  exposures: Exposure[];      // Trader positions (non-zero only)
+  lpBuckets: LpBucket[];      // LP exposures (active only)
 }
 
 /**

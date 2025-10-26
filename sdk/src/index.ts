@@ -12,6 +12,12 @@ export { SlabClient, SlabState, FillReceipt } from './clients/SlabClient';
 export {
   RouterInstruction,
   Portfolio,
+  Exposure,
+  VenueId,
+  VenueKind,
+  AmmLp,
+  SlabLp,
+  LpBucket,
   Registry,
   Vault,
   SlabSplit,
