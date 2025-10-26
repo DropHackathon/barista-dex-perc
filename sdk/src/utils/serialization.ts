@@ -50,6 +50,25 @@ export function serializeI64(value: BN | number): Buffer {
 }
 
 /**
+ * Serialize an i128 (16 bytes, little-endian, two's complement)
+ */
+export function serializeI128(value: BN | number): Buffer {
+  const bn = new BN(value);
+  const buf = Buffer.alloc(16);
+
+  if (bn.isNeg()) {
+    // Two's complement for negative numbers
+    const positive = bn.abs();
+    const complement = new BN(1).shln(128).sub(positive);
+    complement.toArrayLike(Buffer, 'le', 16).copy(buf);
+  } else {
+    bn.toArrayLike(Buffer, 'le', 16).copy(buf);
+  }
+
+  return buf;
+}
+
+/**
  * Serialize a boolean (1 byte)
  */
 export function serializeBool(value: boolean): Buffer {
@@ -88,6 +107,22 @@ export function deserializeI64(buffer: Buffer, offset: number = 0): BN {
   if (bytes[7] & 0x80) {
     // Convert from two's complement
     return value.sub(new BN(1).shln(64));
+  }
+
+  return value;
+}
+
+/**
+ * Deserialize an i128 (16 bytes, little-endian, two's complement)
+ */
+export function deserializeI128(buffer: Buffer, offset: number = 0): BN {
+  const bytes = buffer.slice(offset, offset + 16);
+  const value = new BN(bytes, 'le');
+
+  // Check if negative (sign bit set - bit 127 = byte 15, bit 7)
+  if (bytes[15] & 0x80) {
+    // Convert from two's complement
+    return value.sub(new BN(1).shln(128));
   }
 
   return value;

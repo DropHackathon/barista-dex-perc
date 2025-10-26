@@ -5,11 +5,13 @@ import {
   serializeU64,
   serializeU128,
   serializeI64,
+  serializeI128,
   serializeBool,
   serializePubkey,
   deserializeU64,
   deserializeU128,
   deserializeI64,
+  deserializeI128,
   deserializeBool,
   deserializePubkey,
   createInstructionData,
@@ -103,6 +105,72 @@ describe('Serialization Utils', () => {
       const serialized = serializeI64(value);
       const deserialized = deserializeI64(serialized);
       expect(deserialized.eq(value)).toBe(true);
+    });
+  });
+
+  describe('serializeI128 / deserializeI128', () => {
+    it('should serialize and deserialize positive i128', () => {
+      const value = new BN('1000000000000');
+      const serialized = serializeI128(value);
+      expect(serialized.length).toBe(16);
+
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should serialize and deserialize negative i128', () => {
+      const value = new BN('-5000000000000');
+      const serialized = serializeI128(value);
+
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should handle zero', () => {
+      const value = new BN(0);
+      const serialized = serializeI128(value);
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should handle -1', () => {
+      const value = new BN(-1);
+      const serialized = serializeI128(value);
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should handle large positive values', () => {
+      // 2^100
+      const value = new BN('1267650600228229401496703205376');
+      const serialized = serializeI128(value);
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should handle large negative values', () => {
+      const value = new BN('-1267650600228229401496703205376');
+      const serialized = serializeI128(value);
+      const deserialized = deserializeI128(serialized);
+      expect(deserialized.eq(value)).toBe(true);
+    });
+
+    it('should round-trip multiple values', () => {
+      const values = [
+        new BN(0),
+        new BN(1),
+        new BN(-1),
+        new BN(1000000),
+        new BN(-1000000),
+        new BN('123456789012345678901234567890'),
+        new BN('-123456789012345678901234567890'),
+      ];
+
+      for (const value of values) {
+        const serialized = serializeI128(value);
+        const deserialized = deserializeI128(serialized);
+        expect(deserialized.eq(value)).toBe(true);
+      }
     });
   });
 
