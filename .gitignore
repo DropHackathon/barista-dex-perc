@@ -70,6 +70,10 @@ desktop.ini
 .env
 .env.local
 tests/e2e/test-ledger/
+test-ledger/
 
 # Claude
-thoughts/test-ledger/
+thoughts/
+
+# Build artifacts
+target/
