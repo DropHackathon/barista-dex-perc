@@ -127,7 +127,7 @@ First, build all the Solana programs:
 
 ```bash
 # Deploy router
-solana program deploy target/deploy/barista_router.so
+solana program deploy target/deploy/percolator_router.so
 
 # Save the program ID
 # Output: Program Id: <ROUTER_PROGRAM_ID>
@@ -137,7 +137,7 @@ solana program deploy target/deploy/barista_router.so
 
 ```bash
 # Deploy slab
-solana program deploy target/deploy/barista_slab.so
+solana program deploy target/deploy/percolator_slab.so
 
 # Save the program ID
 # Output: Program Id: <SLAB_PROGRAM_ID>
@@ -147,7 +147,7 @@ solana program deploy target/deploy/barista_slab.so
 
 ```bash
 # Deploy oracle
-solana program deploy target/deploy/barista_oracle.so
+solana program deploy target/deploy/percolator_oracle.so
 
 # Save the program ID
 # Output: Program Id: <ORACLE_PROGRAM_ID>
@@ -782,9 +782,9 @@ barista sell --slab <SLAB> -q <QUANTITY> -p <PRICE> --keypair <KEYPAIR> --networ
 ./build-programs.sh
 
 # Deploy each program
-solana program deploy target/deploy/barista_router.so
-solana program deploy target/deploy/barista_slab.so
-solana program deploy target/deploy/barista_oracle.so
+solana program deploy target/deploy/percolator_router.so
+solana program deploy target/deploy/percolator_slab.so
+solana program deploy target/deploy/percolator_oracle.so
 ```
 
 ---

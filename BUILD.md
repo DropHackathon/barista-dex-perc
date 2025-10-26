@@ -35,10 +35,10 @@ This builds all four programs:
 - AMM (`programs/amm`)
 
 Output files will be in `target/deploy/`:
-- `barista_router.so`
-- `barista_slab.so`
-- `barista_oracle.so`
-- `barista_amm.so`
+- `percolator_router.so`
+- `percolator_slab.so`
+- `percolator_oracle.so`
+- `percolator_amm.so`
 
 ### Manual Build
 
@@ -85,10 +85,10 @@ After building, deploy to localnet:
 solana-test-validator --reset
 
 # Deploy programs
-solana program deploy target/deploy/barista_router.so
-solana program deploy target/deploy/barista_slab.so
-solana program deploy target/deploy/barista_oracle.so
-solana program deploy target/deploy/barista_amm.so
+solana program deploy target/deploy/percolator_router.so
+solana program deploy target/deploy/percolator_slab.so
+solana program deploy target/deploy/percolator_oracle.so
+solana program deploy target/deploy/percolator_amm.so
 ```
 
 Save the program IDs from the output - you'll need them for configuration.

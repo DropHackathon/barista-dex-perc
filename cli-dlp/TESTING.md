@@ -125,9 +125,9 @@ cd surfpool && npm install && npm run validator
 ./build-programs.sh
 
 # Deploy each program
-solana program deploy target/deploy/barista_router.so
-solana program deploy target/deploy/barista_slab.so
-solana program deploy target/deploy/barista_oracle.so
+solana program deploy target/deploy/percolator_router.so
+solana program deploy target/deploy/percolator_slab.so
+solana program deploy target/deploy/percolator_oracle.so
 
 # Save the program IDs from the output
 ```
