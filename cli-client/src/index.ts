@@ -138,22 +138,26 @@ program
   .command('price')
   .description('Get current price (market or oracle)')
   .option('--slab <address>', 'Slab address (for market price)')
-  .option('--oracle <address>', 'Oracle address (for oracle price - testing only)')
-  .option('--instrument <address>', 'Instrument address (derives oracle - testing only)')
+  .option('--oracle <address>', 'Oracle/Pyth feed address (for oracle price)')
+  .option('--instrument <address>', 'Instrument address (derives custom oracle - localnet only)')
   .option('-n, --network <network>', 'Network: devnet, mainnet-beta, or localnet (default: mainnet-beta)')
   .option('-u, --url <url>', 'Custom RPC URL (overrides network default)')
   .addHelpText('after', `
 Examples:
-  # Market price (order book bid/ask)
+  # Market price (order book bid/ask - future)
   $ barista price --slab <SLAB_ADDRESS>
 
-  # Oracle price by instrument (v0 testing)
+  # Pyth oracle price (mainnet/devnet)
+  $ barista price --oracle <PYTH_FEED_ADDRESS>
+
+  # Custom oracle price (localnet testing)
   $ barista price --instrument <INSTRUMENT_ADDRESS>
+  $ barista price --oracle <CUSTOM_ORACLE_ADDRESS>
 
-  # Oracle price by oracle address (v0 testing)
-  $ barista price --oracle <ORACLE_ADDRESS>
-
-Note: Oracle prices are for v0 localnet/devnet testing only. Production will use order book prices.
+Notes:
+  • Mainnet/devnet: Use Pyth price feeds with --oracle
+  • Localnet: Use custom oracle for testing with --instrument or --oracle
+  • Future versions will use order book prices (--slab)
 `)
   .action(priceCommand);
 

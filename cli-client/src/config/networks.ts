@@ -15,15 +15,17 @@ import {
 export interface NetworkConfig {
   routerProgramId: PublicKey;
   slabProgramId: PublicKey;
-  oracleProgramId: PublicKey;
+  oracleProgramId?: PublicKey; // Optional: only for localnet testing
   rpcUrl: string;
 }
 
-// Oracle program IDs (placeholder - update with actual deployed IDs)
-export const ORACLE_PROGRAM_IDS: Record<Cluster, PublicKey> = {
-  'mainnet-beta': new PublicKey('11111111111111111111111111111111'), // TODO: Deploy
-  'devnet': new PublicKey('11111111111111111111111111111111'), // TODO: Deploy
-  'localnet': new PublicKey('11111111111111111111111111111111'), // TODO: Set from deployment
+// Oracle program IDs
+// Note: Mainnet/devnet use Pyth (no custom oracle program needed)
+// Localnet uses custom oracle for testing
+export const ORACLE_PROGRAM_IDS: Partial<Record<Cluster, PublicKey>> = {
+  // mainnet-beta: Use Pyth directly
+  // devnet: Use Pyth directly
+  'localnet': new PublicKey('11111111111111111111111111111111'), // TODO: Set from localnet deployment
 };
 
 /**
@@ -39,19 +41,19 @@ export const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
   'mainnet-beta': {
     routerProgramId: ROUTER_PROGRAM_IDS['mainnet-beta'],
     slabProgramId: SLAB_PROGRAM_IDS['mainnet-beta'],
-    oracleProgramId: ORACLE_PROGRAM_IDS['mainnet-beta'],
+    // oracleProgramId: Use Pyth directly on mainnet
     rpcUrl: RPC_ENDPOINTS['mainnet-beta'],
   },
   'devnet': {
     routerProgramId: ROUTER_PROGRAM_IDS.devnet,
     slabProgramId: SLAB_PROGRAM_IDS.devnet,
-    oracleProgramId: ORACLE_PROGRAM_IDS.devnet,
+    // oracleProgramId: Use Pyth directly on devnet
     rpcUrl: RPC_ENDPOINTS.devnet,
   },
   'localnet': {
     routerProgramId: ROUTER_PROGRAM_IDS.localnet,
     slabProgramId: SLAB_PROGRAM_IDS.localnet,
-    oracleProgramId: ORACLE_PROGRAM_IDS.localnet,
+    oracleProgramId: ORACLE_PROGRAM_IDS.localnet, // Custom oracle for testing
     rpcUrl: RPC_ENDPOINTS.localnet,
   },
 };

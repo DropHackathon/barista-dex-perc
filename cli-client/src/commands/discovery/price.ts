@@ -69,15 +69,22 @@ export async function priceCommand(options: PriceOptions): Promise<void> {
           process.exit(1);
         }
       } else if (options.instrument) {
-        // Derive oracle from instrument
+        // Derive oracle from instrument (localnet only)
         spinner.text = 'Deriving oracle address from instrument...';
 
+        if (!config.oracleProgramId) {
+          spinner.fail();
+          displayError('Oracle program not configured for this network. Use --oracle with Pyth feed address, or use localnet for custom oracle testing.');
+          console.log(chalk.gray('\nNote: Mainnet/devnet use Pyth price feeds directly.'));
+          console.log(chalk.gray('Set BARISTA_ORACLE_PROGRAM env var if using a custom oracle.\n'));
+          process.exit(1);
+        }
+
         const instrumentPubkey = new PublicKey(options.instrument);
-        const oracleProgramId = new PublicKey(config.oracleProgramId);
 
         const [derivedOracle] = PublicKey.findProgramAddressSync(
           [Buffer.from('oracle'), instrumentPubkey.toBuffer()],
-          oracleProgramId
+          config.oracleProgramId
         );
 
         oracleAddress = derivedOracle;
@@ -156,7 +163,11 @@ export async function priceCommand(options: PriceOptions): Promise<void> {
       }
 
       console.log();
-      console.log(chalk.gray('Note: Oracle prices used for v0 testing only. Future versions use order book.'));
+      if (config.oracleProgramId) {
+        console.log(chalk.gray('Note: Custom oracle for localnet testing only. Mainnet/devnet use Pyth.'));
+      } else {
+        console.log(chalk.gray('Note: Using Pyth price feed. Future versions will use order book prices.'));
+      }
       console.log(chalk.bold.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
 
       return;
