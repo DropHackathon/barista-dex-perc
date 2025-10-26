@@ -463,75 +463,60 @@ export class RouterClient {
   }
 
   /**
-   * Build Deposit instruction
-   * @param mint Token mint to deposit
-   * @param amount Amount to deposit (u128)
+   * Build Deposit instruction (SOL only)
+   * Deposits SOL from user's wallet to their portfolio account
+   * @param amount Amount of lamports to deposit (u64)
    * @param user User's public key
-   * @param userTokenAccount User's token account
    * @returns TransactionInstruction
    */
-  buildDepositInstruction(
-    mint: PublicKey,
+  async buildDepositInstruction(
     amount: BN,
-    user: PublicKey,
-    userTokenAccount: PublicKey
-  ): TransactionInstruction {
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const [vaultPDA] = this.deriveVaultPDA(mint);
-    const [registryPDA] = this.deriveRegistryPDA();
+    user: PublicKey
+  ): Promise<TransactionInstruction> {
+    const portfolioAddress = await this.derivePortfolioAddress(user);
 
     const data = createInstructionData(
       RouterInstruction.Deposit,
-      serializeU128(amount)
+      serializeU64(amount)
     );
 
     return new TransactionInstruction({
       programId: this.programId,
       keys: [
-        { pubkey: portfolioPDA, isSigner: false, isWritable: true },
-        { pubkey: vaultPDA, isSigner: false, isWritable: true },
-        { pubkey: registryPDA, isSigner: false, isWritable: true },
-        { pubkey: user, isSigner: true, isWritable: false },
-        { pubkey: userTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: mint, isSigner: false, isWritable: false },
-        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+        { pubkey: user, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ],
       data,
     });
   }
 
   /**
-   * Build Withdraw instruction
-   * @param mint Token mint to withdraw
-   * @param amount Amount to withdraw (u128)
+   * Build Withdraw instruction (SOL only)
+   * Withdraws SOL from portfolio account to user's wallet
+   * @param amount Amount of lamports to withdraw (u64)
    * @param user User's public key
-   * @param userTokenAccount User's token account
    * @returns TransactionInstruction
    */
-  buildWithdrawInstruction(
-    mint: PublicKey,
+  async buildWithdrawInstruction(
     amount: BN,
-    user: PublicKey,
-    userTokenAccount: PublicKey
-  ): TransactionInstruction {
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const [vaultPDA] = this.deriveVaultPDA(mint);
-    const [authorityPDA] = this.deriveAuthorityPDA();
+    user: PublicKey
+  ): Promise<TransactionInstruction> {
+    const portfolioAddress = await this.derivePortfolioAddress(user);
+    const [registryPDA] = this.deriveRegistryPDA();
 
     const data = createInstructionData(
       RouterInstruction.Withdraw,
-      serializeU128(amount)
+      serializeU64(amount)
     );
 
     return new TransactionInstruction({
       programId: this.programId,
       keys: [
-        { pubkey: portfolioPDA, isSigner: false, isWritable: true },
-        { pubkey: vaultPDA, isSigner: false, isWritable: true },
-        { pubkey: authorityPDA, isSigner: false, isWritable: false },
-        { pubkey: user, isSigner: true, isWritable: false },
-        { pubkey: userTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: portfolioAddress, isSigner: false, isWritable: true },
+        { pubkey: user, isSigner: true, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: registryPDA, isSigner: false, isWritable: false },
       ],
       data,
     });

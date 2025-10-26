@@ -52,23 +52,18 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
 
       const network = options.network || 'mainnet-beta';
 
-      // Show different guidance based on network
-      if (network === 'localnet') {
-        console.log(chalk.gray('\nFor localnet testing:'));
-        console.log(chalk.gray('  1. Create test tokens: spl-token create-token'));
-        console.log(chalk.gray('  2. Create token account: spl-token create-account <MINT>'));
-        console.log(chalk.gray('  3. Mint to yourself: spl-token mint <MINT> <AMOUNT>'));
-        console.log(chalk.gray('  4. Then deposit:'));
-        console.log(chalk.cyan('     barista deposit --mint <MINT> --amount <AMOUNT> --network localnet\n'));
-      } else {
-        console.log(chalk.gray('\nTo initialize your portfolio:'));
-        console.log(chalk.cyan('  • barista deposit --mint <MINT> --amount <AMOUNT> --network ' + network));
-        console.log(chalk.gray('    (You must already have tokens in your wallet)'));
-        console.log(chalk.cyan('\n  • barista buy --slab <SLAB> -q <QUANTITY> --network ' + network));
-        console.log(chalk.cyan('  • barista sell --slab <SLAB> -q <QUANTITY> --network ' + network));
-      }
+      console.log(chalk.gray('\nTo initialize your portfolio, deposit SOL:'));
+      console.log(chalk.cyan('  barista deposit --amount <LAMPORTS> --network ' + network));
+      console.log(chalk.gray('  (1 SOL = 1000000000 lamports)'));
+      console.log(chalk.gray('\nExamples:'));
+      console.log(chalk.cyan('  barista deposit --amount 1000000000 --network ' + network + '  # 1 SOL'));
+      console.log(chalk.cyan('  barista deposit --amount 500000000 --network ' + network + '   # 0.5 SOL'));
 
-      console.log(chalk.gray('\nYour portfolio will be created automatically in the same transaction.\n'));
+      console.log(chalk.gray('\nOr start trading (also auto-creates portfolio):'));
+      console.log(chalk.cyan('  barista buy --slab <SLAB> -q <QUANTITY> --network ' + network));
+      console.log(chalk.cyan('  barista sell --slab <SLAB> -q <QUANTITY> --network ' + network));
+
+      console.log(chalk.gray('\n💡 Note: v0 supports SOL deposits only (USDC coming in v1+)\n'));
       process.exit(1);
     }
 

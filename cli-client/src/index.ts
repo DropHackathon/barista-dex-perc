@@ -35,9 +35,8 @@ program
 
 program
   .command('deposit')
-  .description('Deposit collateral to vault')
-  .requiredOption('-m, --mint <address>', 'Token mint address')
-  .requiredOption('-a, --amount <amount>', 'Amount to deposit (in base units)')
+  .description('Deposit SOL to portfolio (SOL only for v0)')
+  .requiredOption('-a, --amount <lamports>', 'Amount to deposit in lamports (1 SOL = 1000000000 lamports)')
   .option('-n, --network <network>', 'Network: devnet, mainnet-beta, or localnet (default: mainnet-beta)')
   .option('-k, --keypair <path>', 'Path to keypair file')
   .option('-u, --url <url>', 'Custom RPC URL')
@@ -45,9 +44,8 @@ program
 
 program
   .command('withdraw')
-  .description('Withdraw collateral from vault')
-  .requiredOption('-m, --mint <address>', 'Token mint address')
-  .requiredOption('-a, --amount <amount>', 'Amount to withdraw (in base units)')
+  .description('Withdraw SOL from portfolio (SOL only for v0)')
+  .requiredOption('-a, --amount <lamports>', 'Amount to withdraw in lamports (1 SOL = 1000000000 lamports)')
   .option('-n, --network <network>', 'Network: devnet, mainnet-beta, or localnet (default: mainnet-beta)')
   .option('-k, --keypair <path>', 'Path to keypair file')
   .option('-u, --url <url>', 'Custom RPC URL')
