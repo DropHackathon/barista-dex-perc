@@ -200,37 +200,110 @@ barista-dlp withdraw --amount 5000000000 --force
 ❯ Withdrawal cancelled
 ```
 
-### Slab Commands (Coming Soon)
+### Slab Commands
 
 #### `slab:create`
-Create a new order book slab for a market.
+Create a new order book slab.
 
 ```bash
-barista-dlp slab:create --market SOL-PERP
+barista-dlp slab:create \
+  --instrument <instrument-address> \
+  --mark-price 100.50 \
+  --taker-fee 10 \
+  --contract-size 1.0
 ```
+
+**Options:**
+- `--instrument <address>` - Instrument (perp market) public key
+- `--mark-price <price>` - Initial mark price in USD (e.g., 100.50)
+- `--taker-fee <bps>` - Taker fee in basis points (e.g., 10 = 0.1%)
+- `--contract-size <size>` - Contract size (e.g., 1.0)
+- `--yes` - Skip confirmation prompts
+- `--keypair <path>` - Path to DLP wallet keypair
+- `--network <network>` - Network to use
+
+**Interactive Mode:**
+If options are not provided, the CLI will prompt for each parameter:
+```bash
+barista-dlp slab:create
+
+? Instrument address (perp market): <paste-address>
+? Mark price (USD, e.g., 100.50): 100.00
+? Taker fee (bps, e.g., 10 = 0.1%): 10
+? Contract size (e.g., 1.0): 1.0
+? Create slab with these settings? Yes
+
+✓ Slab created successfully!
+  Slab Address: 7EqQdEU...vcMwJeK
+  Signature: 5j8dqXJ...rYjk9Z
+
+⚠ Save this slab address! You'll need it to manage this slab
+```
+
+**Notes:**
+- Slab PDA is derived from: `['slab', lpOwner, instrument]`
+- Only one slab per LP Owner + Instrument combination
+- Requires portfolio to exist first
 
 #### `slab:view`
 View slab details and current state.
 
 ```bash
+# Basic view
 barista-dlp slab:view --address <slab-pubkey>
+
+# Detailed view with prices and instruments
+barista-dlp slab:view --address <slab-pubkey> --detailed
 ```
 
-#### `slab:update`
+**Options:**
+- `--address <pubkey>` - Slab address (required)
+- `--detailed` - Show best prices and instruments
+- `--keypair <path>` - Path to DLP wallet (to check ownership)
+- `--network <network>` - Network to use
+
+**Example Output:**
+```
+═══════════════════════════════════════
+           Slab Information
+═══════════════════════════════════════
+
+┌──────────────────────┬────────────────────────────────┐
+│ Field                │ Value                          │
+├──────────────────────┼────────────────────────────────┤
+│ Slab Address         │ 7EqQdEU...vcMwJeK              │
+│ LP Owner (DLP)       │ 9aE2FN...Lp4k2                 │
+│ Router ID            │ Router1...2r3t                 │
+│ Instrument           │ SOLPER...P1                    │
+│                      │ ✓ You own this slab            │
+└──────────────────────┴────────────────────────────────┘
+
+┌──────────────────────┬────────────────────────────────┐
+│ Parameter            │ Value                          │
+├──────────────────────┼────────────────────────────────┤
+│ Mark Price           │ $100.00                        │
+│ Contract Size        │ 1.000000                       │
+│ Taker Fee            │ 10.00 bps                      │
+│ Sequence Number      │ 0                              │
+│ Bump                 │ 255                            │
+└──────────────────────┴────────────────────────────────┘
+```
+
+#### `slab:update` (Coming Soon)
 Update slab parameters (fees, limits, etc.).
 
 ```bash
 barista-dlp slab:update --address <slab-pubkey> --fee-bps 10
 ```
 
-#### `slab:pause`
+#### `slab:pause` (Coming Soon)
 Pause trading on a slab (emergency stop).
 
 ```bash
 barista-dlp slab:pause --address <slab-pubkey>
 ```
 
-#### `slab:resume`
+#### `slab:resume` (Coming Soon)
 Resume trading on a paused slab.
 
 ```bash

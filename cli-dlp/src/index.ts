@@ -5,6 +5,8 @@ import { viewCommand } from './commands/portfolio/view';
 import { initCommand } from './commands/portfolio/init';
 import { depositCommand } from './commands/portfolio/deposit';
 import { withdrawCommand } from './commands/portfolio/withdraw';
+import { createSlabCommand } from './commands/slab/create';
+import { viewSlabCommand } from './commands/slab/view';
 import chalk from 'chalk';
 
 const program = new Command();
@@ -49,6 +51,24 @@ program
   .option('--force', 'Skip safety checks (dangerous!)')
   .action(withdrawCommand);
 
+// Slab commands
+program
+  .command('slab:create')
+  .description('Create a new slab')
+  .option('--instrument <address>', 'Instrument (perp market) address')
+  .option('--mark-price <price>', 'Mark price in USD (e.g., 100.50)')
+  .option('--taker-fee <bps>', 'Taker fee in basis points (e.g., 10)')
+  .option('--contract-size <size>', 'Contract size (e.g., 1.0)')
+  .option('--yes', 'Skip confirmation prompts')
+  .action(createSlabCommand);
+
+program
+  .command('slab:view')
+  .description('View slab details')
+  .requiredOption('--address <pubkey>', 'Slab address')
+  .option('--detailed', 'Show detailed information')
+  .action(viewSlabCommand);
+
 // Add welcome message for no args
 if (process.argv.length === 2) {
   console.log(chalk.bold('\n🏪 Barista DEX - DLP CLI\n'));
@@ -60,6 +80,8 @@ if (process.argv.length === 2) {
   console.log('  portfolio        View portfolio details');
   console.log('  deposit          Deposit SOL capital');
   console.log('  withdraw         Withdraw SOL');
+  console.log('  slab:create      Create a new slab');
+  console.log('  slab:view        View slab details');
   console.log('\nFor help:');
   console.log('  barista-dlp --help');
   console.log('  barista-dlp <command> --help\n');
