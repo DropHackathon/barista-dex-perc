@@ -5,7 +5,7 @@ All notable changes to `@barista-dex/cli-dlp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2025-10-26
+## [0.1.1] - 2025-10-26
 
 ### Added
 - **Slab Management Commands**
@@ -16,11 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Best prices and instruments display in detailed view mode
 - Comprehensive test suite for slab commands
 - PDA derivation and existence checking for slabs
+- **npm Publishing Setup**
+  - .npmignore file to exclude unnecessary files
+  - LICENSE file (Apache-2.0)
+  - CHANGELOG.md for version tracking
+  - Publishing documentation in README
 
 ### Changed
-- Updated version to 0.2.0
+- Enhanced README with npm installation instructions and badges
 - Enhanced README with slab command documentation
-- Updated implementation summary to reflect Phase 2 completion
+- Updated implementation summary to reflect completed features
+- Added repository, homepage, and bugs URLs to package.json
+- Added prepublishOnly and prepare scripts
 
 ### Technical
 - Uses `SlabClient.buildInitializeSlabInstruction()` for slab creation
@@ -83,5 +90,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[0.2.0]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.2.0
+[0.1.1]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.1.1
 [0.1.0]: https://github.com/barista-dex/barista-dex/releases/tag/cli-dlp-v0.1.0
