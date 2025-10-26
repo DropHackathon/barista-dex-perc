@@ -1,7 +1,16 @@
 import { PublicKey } from '@solana/web3.js';
+import {
+  Cluster,
+  ROUTER_PROGRAM_IDS,
+  SLAB_PROGRAM_IDS,
+  RPC_ENDPOINTS,
+} from '@barista-dex/sdk';
 
 /**
  * Network-specific configuration for Barista DEX
+ *
+ * Note: This file imports constants from @barista-dex/sdk
+ * to maintain a single source of truth.
  */
 export interface NetworkConfig {
   routerProgramId: PublicKey;
@@ -10,32 +19,29 @@ export interface NetworkConfig {
 }
 
 /**
- * Supported networks
+ * Supported networks (re-exported from SDK)
  */
-export type NetworkName = 'mainnet-beta' | 'devnet' | 'localnet';
+export type NetworkName = Cluster;
 
 /**
- * Network configurations with hardcoded program IDs
- * TODO: Update with actual deployed program IDs after deployment
+ * Network configurations using SDK constants
+ * All program IDs and RPC endpoints come from @barista-dex/sdk
  */
 export const NETWORK_CONFIGS: Record<NetworkName, NetworkConfig> = {
   'mainnet-beta': {
-    // TODO: Replace with actual mainnet-beta deployed program IDs
-    routerProgramId: new PublicKey('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr'),
-    slabProgramId: new PublicKey('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk'),
-    rpcUrl: 'https://api.mainnet-beta.solana.com',
+    routerProgramId: ROUTER_PROGRAM_IDS['mainnet-beta'],
+    slabProgramId: SLAB_PROGRAM_IDS['mainnet-beta'],
+    rpcUrl: RPC_ENDPOINTS['mainnet-beta'],
   },
   'devnet': {
-    // TODO: Replace with actual devnet deployed program IDs
-    routerProgramId: new PublicKey('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr'),
-    slabProgramId: new PublicKey('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk'),
-    rpcUrl: 'https://api.devnet.solana.com',
+    routerProgramId: ROUTER_PROGRAM_IDS.devnet,
+    slabProgramId: SLAB_PROGRAM_IDS.devnet,
+    rpcUrl: RPC_ENDPOINTS.devnet,
   },
   'localnet': {
-    // TODO: Replace with actual localnet deployed program IDs
-    routerProgramId: new PublicKey('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr'),
-    slabProgramId: new PublicKey('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk'),
-    rpcUrl: 'http://localhost:8899',
+    routerProgramId: ROUTER_PROGRAM_IDS.localnet,
+    slabProgramId: SLAB_PROGRAM_IDS.localnet,
+    rpcUrl: RPC_ENDPOINTS.localnet,
   },
 };
 

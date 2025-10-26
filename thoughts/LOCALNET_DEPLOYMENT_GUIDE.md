@@ -337,57 +337,114 @@ node dist/index.js sell \
 
 ## Testing Oracle Integration (Optional)
 
-### Step 15: Deploy Custom Oracle
+### Step 15: Build and Deploy Oracle Program
 
-For localnet testing, use the custom oracle format:
+The oracle program must be deployed before you can create oracle accounts:
 
 ```bash
-# Build keeper
-cd keeper
-cargo build --release
+# From project root
+cd /path/to/barista-dex
 
-# Initialize a test oracle
-./target/release/keeper oracle init \
-  --symbol SOL \
-  --price 100.0 \
-  --network localnet
+# Build oracle program (use --manifest-path, NOT -p)
+cargo build-sbf --manifest-path programs/oracle/Cargo.toml
+
+# Output location: target/deploy/percolator_oracle.so
+
+# Deploy oracle program to localnet
+solana program deploy target/deploy/percolator_oracle.so
 
 # Example output:
-# ✓ Oracle created: 8kX2M5nB3vL9qR4tH7pS6wC1fY8oE9jA2dN4kP6mG3h
+# Program Id: 5kL9X3mN8vR2qT4pY7wH6jC1sF8oB9eA2dM4nP6kG3h
 ```
 
-### Step 16: Start Oracle Crank (Auto-Updates)
+**Save the Oracle Program Id** - you'll need it for the next step.
+
+### Step 16: Build Keeper Tool
+
+The keeper tool is used to initialize and manage oracles:
+
+```bash
+# From project root (NOT from keeper/ directory!)
+cargo build --release -p percolator-keeper
+
+# Binary will be at: ./target/release/percolator-keeper
+# Verify it works:
+./target/release/percolator-keeper --help
+```
+
+**Important**: Build from the workspace root, not from `keeper/` directory.
+
+### Step 17: Initialize a Test Oracle
+
+Create an oracle account for price feeds:
+
+```bash
+# Initialize oracle (use --instrument, not --symbol!)
+./target/release/percolator-keeper oracle init \
+  --instrument SOL \
+  --price 200.0 \
+  --oracle-program <ORACLE_PROGRAM_ID_FROM_STEP_15>
+
+# Example with actual program ID:
+./target/release/percolator-keeper oracle init \
+  --instrument SOL \
+  --price 200.0 \
+  --oracle-program FrnW9C4pyFYriXU88ydVNhKBTWbhksCzpAkjuD4Smpzf
+
+# Example output:
+# [INFO] Initializing oracle for instrument: SOL
+# [INFO] Oracle address: 4eJudU6pHRUQSxfwxX1Esn6x5H9C3K2G1oEXW74E7iuG
+# [INFO] Instrument: SOL (EPEhSwfWjqyvFhNYJK9sEmZUG33CtUm37pvJ6C3eJF5N)
+# [INFO] Initial price: $200.00 (200000000 scaled)
+# ✓ Oracle created successfully
+```
+
+**Save the Oracle Address** - you'll need this for the router configuration.
+
+### Step 18: Start Oracle Crank (Auto-Updates)
 
 ```bash
 # Start auto-updater with mock prices
-keeper oracle crank \
+./target/release/percolator-keeper oracle crank \
   --oracle <ORACLE_ADDRESS> \
   --source mock \
-  --interval 5 \
-  --network localnet
+  --interval 5
+
+# With example oracle address
+./target/release/percolator-keeper oracle crank \
+  --oracle 6Lhay5rpwDm8Jr1Ce4UDPo7fXRS8SbxnRFJKMVDoc12K \
+  --source mock \
+  --interval 5
 
 # Or with real CoinGecko prices (for SOL):
-keeper oracle crank \
+./target/release/percolator-keeper oracle crank \
   --oracle <ORACLE_ADDRESS> \
+  --oracle-program <ORACLE_PROGRAM_ID> \
   --source coingecko \
-  --symbol solana \
-  --interval 10 \
-  --network localnet
+  --instrument solana \
+  --interval 60
+
+# With example oracle address
+./target/release/percolator-keeper oracle crank \
+  --oracle 6Lhay5rpwDm8Jr1Ce4UDPo7fXRS8SbxnRFJKMVDoc12K \
+  --oracle-program FrnW9C4pyFYriXU88ydVNhKBTWbhksCzpAkjuD4Smpzf \
+  --source coingecko \
+  --instrument solana \
+  --interval 60
 ```
 
-### Step 17: Verify Oracle
+### Step 19: Verify Oracle
 
 ```bash
 # Check oracle state
-keeper oracle show \
-  --oracle <ORACLE_ADDRESS> \
-  --network localnet
+./target/release/percolator-keeper oracle show \
+  --oracle <ORACLE_ADDRESS>
 
 # Output:
-# Oracle: 8kX2M5nB3vL9qR4tH7pS6wC1fY8oE9jA2dN4kP6mG3h
-# Price: 100.123456
+# Oracle: 4eJudU6pHRUQSxfwxX1Esn6x5H9C3K2G1oEXW74E7iuG
+# Price: $200.12
 # Confidence: ±0.01
-# Timestamp: 2025-10-24 23:30:00 UTC
+# Timestamp: 2025-10-26 09:30:00 UTC
 # Status: Trading
 ```
 
