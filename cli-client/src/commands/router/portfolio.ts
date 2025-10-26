@@ -47,7 +47,13 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
 
     if (!portfolio) {
       spinner.fail();
-      displayError('Portfolio not found. The user may not have initialized their portfolio yet.');
+      console.log(chalk.yellow('\n⚠️  Portfolio not found\n'));
+      console.log(chalk.gray('Your portfolio will be automatically created on first use.'));
+      console.log(chalk.gray('\nTo initialize your portfolio, use any of these commands:'));
+      console.log(chalk.cyan('  • barista deposit --mint <MINT> --amount <AMOUNT> --network ' + (options.network || 'mainnet-beta')));
+      console.log(chalk.cyan('  • barista buy --slab <SLAB> -q <QUANTITY> --network ' + (options.network || 'mainnet-beta')));
+      console.log(chalk.cyan('  • barista sell --slab <SLAB> -q <QUANTITY> --network ' + (options.network || 'mainnet-beta')));
+      console.log(chalk.gray('\nYour portfolio will be created automatically in the same transaction.\n'));
       process.exit(1);
     }
 
