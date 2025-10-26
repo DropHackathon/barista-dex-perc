@@ -17,8 +17,28 @@ const program = new Command();
 
 program
   .name('barista')
-  .description('Command-line interface for Barista DEX')
-  .version('0.1.0');
+  .description('Command-line interface for Barista DEX - Trader CLI (v0)')
+  .version('0.1.0')
+  .addHelpText('after', `
+v0 Limitations:
+  • Market orders only - executes instantly at oracle price (±0.5% slippage)
+  • Limit orders execute instantly (NOT resting orders) - price validation only
+  • Single instrument per slab (v1+: up to 32 instruments)
+  • Atomic fills - no partial fills or order book
+  • SOL collateral only (v1+: multi-collateral support)
+
+Oracle Integration:
+  • All trades validated against oracle prices
+  • Oracles auto-fetched from SlabRegistry (no manual oracle parameters needed)
+  • Market orders execute at live oracle price
+  • Limit orders sanity-checked within ±20% of oracle (instant fill)
+
+Examples:
+  $ barista buy --slab <SLAB_ID> -q 1000              # Market order at oracle price
+  $ barista sell --slab <SLAB_ID> -q 500 -l 5x        # Margin sell with 5x leverage
+  $ barista portfolio                                  # View positions and health
+  $ barista deposit -a 1000000000                      # Deposit 1 SOL
+`);
 
 // ============================================================
 // Portfolio Commands

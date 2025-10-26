@@ -178,6 +178,14 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     console.log(chalk.cyan(`    → Actual position: ${validation.positionSize.toString()} units (${validation.actualQuantity.toString()} contracts)`));
     console.log(chalk.gray(`    Available equity: ${validation.availableEquity.toString()} units`));
 
+    // Show v0 limit order warning
+    if (!isMarketOrder) {
+      console.log();
+      console.log(chalk.yellow(`  ⚠️  v0 LIMIT ORDER: Executes INSTANTLY (not a resting order)`));
+      console.log(chalk.gray(`     Price is sanity-checked within ±20% of oracle, then fills immediately`));
+      console.log(chalk.gray(`     True limit orders (wait for price) coming in v1+`));
+    }
+
     // Show warnings for high leverage
     if (leverage >= 8) {
       console.log();
@@ -222,12 +230,14 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       spinner.text = 'Creating portfolio (first-time setup)...';
     }
 
-    const buyIx = client.buildBuyInstruction(
+    // Build buy instruction - oracle is auto-fetched from SlabRegistry
+    spinner.text = 'Fetching oracle from registry...';
+    const buyIx = await client.buildBuyInstruction(
       wallet.publicKey,
       slabMarket,
       validation.actualQuantity,  // Use leveraged quantity!
-      price,
-      config.slabProgramId
+      price
+      // Oracle parameter omitted - SDK auto-fetches from SlabRegistry
     );
 
     const transaction = new Transaction()
