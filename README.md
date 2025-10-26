@@ -139,11 +139,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Install Solana toolchain
 sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
 
-# Build BPF programs
-cargo build-sbf
+# Build BPF programs (use script to avoid dependency issues)
+./build-programs.sh
 
-# Build specific program
+# Or build specific program manually
 cargo build-sbf --manifest-path programs/router/Cargo.toml
+
+# See BUILD.md for detailed build instructions
 ```
 
 ## Technology Stack

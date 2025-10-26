@@ -349,8 +349,11 @@ percolator --url https://api.devnet.solana.com <command>
 
 **Program deployment failed**
 ```bash
-# Ensure programs are built
-cargo build-sbf
+# Ensure programs are built (use script to avoid dependency issues)
+./build-programs.sh
+
+# Or build manually
+cargo build-sbf --manifest-path programs/router/Cargo.toml
 
 # Check deployer has enough SOL
 solana balance
@@ -388,7 +391,7 @@ The CLI is organized into modules:
 
 - **`config.rs`** - Network configuration and keypair management
 - **`client.rs`** - Solana RPC client utilities
-- **`deploy.rs`** - Program deployment via `cargo build-sbf`
+- **`deploy.rs`** - Program deployment (see [BUILD.md](../BUILD.md) for build instructions)
 - **`exchange.rs`** - Exchange initialization
 - **`matcher.rs`** - Matcher/slab operations
 - **`liquidity.rs`** - Liquidity provision

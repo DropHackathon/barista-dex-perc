@@ -121,9 +121,15 @@ cd surfpool && npm install && npm run validator
 
 ```bash
 # Deploy router, slab, and oracle programs
-cd programs/router && anchor deploy
-cd ../slab && anchor deploy
-cd ../oracle && anchor deploy
+# Build all programs first (from repo root)
+./build-programs.sh
+
+# Deploy each program
+solana program deploy target/deploy/barista_router.so
+solana program deploy target/deploy/barista_slab.so
+solana program deploy target/deploy/barista_oracle.so
+
+# Save the program IDs from the output
 ```
 
 ### 3. Fund Test Wallet
