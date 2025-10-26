@@ -47,6 +47,12 @@ pub enum PercolatorError {
     InvalidQuantity = 211,
     PoolFull = 212,
     SeqnoMismatch = 213,
+    InvalidOrderType = 214,
+
+    // Oracle errors (215-224)
+    InvalidOracle = 215,
+    PriceUnavailable = 216,
+    PriceSlippage = 217,
 
     // Matching errors (300-399)
     InvalidSide = 300,

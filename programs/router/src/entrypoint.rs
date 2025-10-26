@@ -288,7 +288,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
     let vault = unsafe { borrow_account_data_mut::<Vault>(vault_account)? };
     let registry = unsafe { borrow_account_data_mut::<SlabRegistry>(registry_account)? };
 
-    // Parse instruction data: num_splits (u8) + splits (17 bytes each)
+    // Parse instruction data: num_splits (u8) + order_type (u8) + splits (17 bytes each)
     // Layout per split: side (u8) + qty (i64) + limit_px (i64)
     if data.is_empty() {
         msg!("Error: Instruction data is empty");
@@ -297,22 +297,29 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
 
     let mut reader = InstructionReader::new(data);
     let num_splits = reader.read_u8()? as usize;
+    let order_type = reader.read_u8()?;
 
     if num_splits == 0 {
         msg!("Error: num_splits must be > 0");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
-    // Verify we have enough accounts: 5 base + num_splits slabs + num_splits receipts
-    let required_accounts = 5 + (num_splits * 2);
+    if order_type > 1 {
+        msg!("Error: Invalid order_type");
+        return Err(PercolatorError::InvalidOrderType.into());
+    }
+
+    // Verify we have enough accounts: 5 base + num_splits slabs + num_splits receipts + num_splits oracles
+    let required_accounts = 5 + (num_splits * 3);
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for ExecuteCrossSlab");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
-    // Split accounts into slabs and receipts
+    // Split accounts into slabs, receipts, and oracles
     let slab_accounts = &accounts[5..5 + num_splits];
     let receipt_accounts = &accounts[5 + num_splits..5 + num_splits * 2];
+    let oracle_accounts = &accounts[5 + num_splits * 2..5 + num_splits * 3];
 
     // Parse splits from instruction data (on stack, small)
     // Use a fixed-size buffer to avoid heap allocation
@@ -363,7 +370,9 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         router_authority,
         slab_accounts,
         receipt_accounts,
+        oracle_accounts,
         splits,
+        order_type,
     )?;
 
     msg!("ExecuteCrossSlab processed successfully");

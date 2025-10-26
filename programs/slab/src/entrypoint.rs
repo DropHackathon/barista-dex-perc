@@ -8,7 +8,7 @@ use pinocchio::{
     ProgramResult,
 };
 
-use crate::instructions::{SlabInstruction, process_initialize_slab, process_commit_fill, Side};
+use crate::instructions::{SlabInstruction, process_initialize_slab, process_commit_fill, Side, OrderType};
 use crate::state::SlabState;
 use percolator_common::{PercolatorError, validate_owner, validate_writable, borrow_account_data_mut, InstructionReader};
 
@@ -112,21 +112,24 @@ fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data:
 /// 0. `[writable]` Slab state account
 /// 1. `[writable]` Fill receipt account
 /// 2. `[signer]` Router signer
+/// 3. `[]` Oracle account (price feed)
 ///
-/// Expected data layout (21 bytes):
+/// Expected data layout (22 bytes):
 /// - expected_seqno: u32 (4 bytes) - expected slab seqno (TOCTOU protection)
+/// - order_type: u8 (1 byte) - 0 = Market, 1 = Limit
 /// - side: u8 (1 byte) - 0 = Buy, 1 = Sell
 /// - qty: i64 (8 bytes) - quantity to fill (1e6 scale)
 /// - limit_px: i64 (8 bytes) - limit price (1e6 scale)
 fn process_commit_fill_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 3 {
-        msg!("Error: CommitFill instruction requires at least 3 accounts");
+    if accounts.len() < 4 {
+        msg!("Error: CommitFill instruction requires at least 4 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     let slab_account = &accounts[0];
     let receipt_account = &accounts[1];
     let router_signer = &accounts[2];
+    let oracle_account = &accounts[3];
 
     // Validate slab account
     validate_owner(slab_account, program_id)?;
@@ -139,9 +142,20 @@ fn process_commit_fill_inner(program_id: &Pubkey, accounts: &[AccountInfo], data
     // Parse instruction data
     let mut reader = InstructionReader::new(data);
     let expected_seqno = reader.read_u32()?;
+    let order_type_byte = reader.read_u8()?;
     let side_byte = reader.read_u8()?;
     let qty = reader.read_i64()?;
     let limit_px = reader.read_i64()?;
+
+    // Convert order type byte to OrderType enum
+    let order_type = match order_type_byte {
+        0 => OrderType::Market,
+        1 => OrderType::Limit,
+        _ => {
+            msg!("Error: Invalid order type");
+            return Err(PercolatorError::InvalidOrderType.into());
+        }
+    };
 
     // Convert side byte to Side enum
     let side = match side_byte {
@@ -157,8 +171,10 @@ fn process_commit_fill_inner(program_id: &Pubkey, accounts: &[AccountInfo], data
     process_commit_fill(
         slab,
         receipt_account,
+        oracle_account,
         router_signer.key(),
         expected_seqno,
+        order_type,
         side,
         qty,
         limit_px,

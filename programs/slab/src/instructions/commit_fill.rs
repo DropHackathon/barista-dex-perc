@@ -12,6 +12,16 @@ pub enum Side {
     Sell = 1,
 }
 
+/// Order type - Market vs Limit
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderType {
+    /// Market order: Execute immediately at oracle price (±0.5% slippage tolerance)
+    Market = 0,
+    /// Limit order: Execute at specified limit price (v0: sanity check ±20% of oracle)
+    Limit = 1,
+}
+
 /// Update quote cache after a fill (v0 stub)
 /// In v1, this will reflect actual book state after matching
 fn update_quote_cache_after_fill(
@@ -36,17 +46,28 @@ fn update_quote_cache_after_fill(
     }
 }
 
-/// Process commit_fill instruction (v0 - atomic fill)
+/// Process commit_fill instruction (v0 - atomic fill at router-provided price)
 ///
 /// This is the single CPI endpoint for v0. Router calls this to fill orders.
+///
+/// IMPORTANT: The slab is a "dumb execution venue" - it executes at whatever price
+/// the router provides. Router is responsible for:
+/// - Reading oracle prices
+/// - Validating market vs limit order logic
+/// - Passing validated execution price to slab
+///
+/// The oracle_account is passed through but NOT read by slab - it's for router's use only.
 ///
 /// # Arguments
 /// * `slab` - The slab state account
 /// * `receipt_account` - Account to write fill receipt
+/// * `oracle_account` - Oracle price feed account (for router, slab doesn't read it)
 /// * `router_signer` - Router authority (must match slab.header.router_id)
+/// * `expected_seqno` - Expected slab seqno (TOCTOU protection)
+/// * `order_type` - Market or Limit order (informational for v0)
 /// * `side` - Buy or Sell
 /// * `qty` - Desired quantity (1e6 scale, positive)
-/// * `limit_px` - Worst acceptable price (1e6 scale)
+/// * `limit_px` - Execution price (1e6 scale) - already validated by router
 ///
 /// # Returns
 /// * Writes FillReceipt to receipt_account
@@ -54,8 +75,10 @@ fn update_quote_cache_after_fill(
 pub fn process_commit_fill(
     slab: &mut SlabState,
     receipt_account: &AccountInfo,
+    _oracle_account: &AccountInfo, // Passed through but not used by slab
     router_signer: &Pubkey,
     expected_seqno: u32,
+    _order_type: OrderType,        // Informational only in v0
     side: Side,
     qty: i64,
     limit_px: i64,
