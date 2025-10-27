@@ -116,8 +116,8 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       console.log(chalk.bold('\n📍 Trading Positions\n'));
 
       const exposuresTable = new Table({
-        head: ['Slab', 'Instrument', 'Position Qty', 'Entry Price', 'Mark Price', 'Unrealized PnL', 'Realized PnL'],
-        colWidths: [30, 30, 15, 15, 15, 18, 18],
+        head: ['Slab', 'Instrument', 'Position Qty', 'Entry Price', 'Mark Price', 'Unrealized PnL', 'Realized PnL', 'Notional', 'Leverage'],
+        colWidths: [30, 30, 15, 15, 15, 16, 16, 15, 10],
       });
 
       // Resolve slab addresses from registry
@@ -250,6 +250,22 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           }
         }
 
+        // Calculate notional value and effective leverage
+        let notional = '—';
+        let effectiveLeverage = '—';
+
+        if (!markPrice.isZero() && !exp.positionQty.isZero()) {
+          // Notional = position_qty × mark_price / 1e6 (in SOL/USD value)
+          const notionalValue = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
+          notional = formatAmount(notionalValue);
+
+          // We don't store per-position leverage, but can estimate from portfolio IM
+          // For now, show notional only. Leverage would require knowing the margin used for this specific position.
+          // Note: Portfolio.im is total IM across all positions, not per-position
+          // Effective leverage can't be accurately calculated without per-position IM tracking
+          effectiveLeverage = '—'; // TODO: Add per-position IM tracking
+        }
+
         exposuresTable.push([
           slabAddress,
           instrumentAddress,
@@ -258,6 +274,8 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
           unrealizedPnl,
           realizedPnl,
+          notional === '—' ? '—' : `$${notional}`,
+          effectiveLeverage,
         ]);
       }
 

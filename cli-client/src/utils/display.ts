@@ -3,14 +3,19 @@ import chalk from 'chalk';
 
 /**
  * Format a BN amount with decimals
+ * Handles negative numbers correctly (e.g., -35.544057, not -35.-544057)
  */
 export function formatAmount(amount: BN, decimals: number = 6): string {
   const divisor = new BN(10).pow(new BN(decimals));
-  const whole = amount.div(divisor);
-  const frac = amount.mod(divisor);
+  const isNegative = amount.isNeg();
+  const absAmount = amount.abs();
+
+  const whole = absAmount.div(divisor);
+  const frac = absAmount.mod(divisor);
 
   const fracStr = frac.toString().padStart(decimals, '0');
-  return `${whole.toString()}.${fracStr}`;
+  const sign = isNegative ? '-' : '';
+  return `${sign}${whole.toString()}.${fracStr}`;
 }
 
 /**
