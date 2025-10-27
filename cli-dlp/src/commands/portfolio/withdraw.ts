@@ -51,8 +51,7 @@ export async function withdrawCommand(options: WithdrawOptions): Promise<void> {
 
     // Get portfolio
     spinner.text = 'Fetching portfolio...';
-    const [portfolioPDA] = client.derivePortfolioPDA(wallet.publicKey);
-    const portfolio = await client.getPortfolio(portfolioPDA);
+    const portfolio = await client.getPortfolio(wallet.publicKey);
 
     if (!portfolio) {
       spinner.fail();

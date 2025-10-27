@@ -39,8 +39,7 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
 
     // Get portfolio
     spinner.text = 'Fetching portfolio...';
-    const [portfolioPDA] = client.derivePortfolioPDA(wallet.publicKey);
-    const portfolio = await client.getPortfolio(portfolioPDA);
+    const portfolio = await client.getPortfolio(wallet.publicKey);
 
     if (!portfolio) {
       spinner.fail();
@@ -102,10 +101,11 @@ export async function viewCommand(options: ViewOptions): Promise<void> {
       console.log();
 
       // Portfolio address info
+      const portfolioAddress = await client.derivePortfolioAddress(wallet.publicKey);
       console.log(chalk.bold.cyan('Account Information'));
       console.log(chalk.gray('─────────────────────────────────────────'));
       console.log(chalk.gray(`  Owner: ${wallet.publicKey.toBase58()}`));
-      console.log(chalk.gray(`  Portfolio PDA: ${portfolioPDA.toBase58()}`));
+      console.log(chalk.gray(`  Portfolio Address: ${portfolioAddress.toBase58()}`));
       console.log();
     }
 

@@ -14,7 +14,7 @@ const program = new Command();
 program
   .name('barista-dlp')
   .description('Barista DEX CLI for Liquidity Providers (DLPs)')
-  .version('0.1.0');
+  .version('0.1.15');
 
 // Global options
 program
@@ -30,24 +30,36 @@ program
 program
   .command('portfolio')
   .description('View DLP portfolio details')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .option('--detailed', 'Show detailed per-slab exposure breakdown')
   .action(viewCommand);
 
 program
   .command('portfolio:init')
   .description('Initialize a new DLP portfolio')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .action(initCommand);
 
 program
   .command('deposit')
   .description('Deposit SOL capital to portfolio')
   .requiredOption('--amount <lamports>', 'Amount in lamports to deposit')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .action(depositCommand);
 
 program
   .command('withdraw')
   .description('Withdraw SOL from portfolio')
   .requiredOption('--amount <lamports>', 'Amount in lamports to withdraw')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .option('--force', 'Skip safety checks (dangerous!)')
   .action(withdrawCommand);
 
@@ -59,6 +71,9 @@ program
   .option('--mark-price <price>', 'Mark price in USD (e.g., 100.50)')
   .option('--taker-fee <bps>', 'Taker fee in basis points (e.g., 10)')
   .option('--contract-size <size>', 'Contract size (e.g., 1.0)')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .option('--yes', 'Skip confirmation prompts')
   .action(createSlabCommand);
 
@@ -66,6 +81,9 @@ program
   .command('slab:view')
   .description('View slab details')
   .requiredOption('--address <pubkey>', 'Slab address')
+  .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
+  .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
+  .option('--url <url>', 'Custom RPC URL', process.env.BARISTA_DLP_RPC_URL)
   .option('--detailed', 'Show detailed information')
   .action(viewSlabCommand);
 

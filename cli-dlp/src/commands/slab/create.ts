@@ -1,5 +1,5 @@
-import { Transaction, PublicKey } from '@solana/web3.js';
-import { RouterClient, SlabClient } from '@barista-dex/sdk';
+import { Transaction, PublicKey, SystemProgram } from '@solana/web3.js';
+import { RouterClient, SlabClient, SLAB_SIZE } from '@barista-dex/sdk';
 import BN from 'bn.js';
 import ora from 'ora';
 import chalk from 'chalk';
@@ -46,8 +46,7 @@ export async function createSlabCommand(options: CreateSlabOptions): Promise<voi
 
     // Check portfolio exists
     spinner.text = 'Checking portfolio...';
-    const [portfolioPDA] = routerClient.derivePortfolioPDA(wallet.publicKey);
-    const portfolio = await routerClient.getPortfolio(portfolioPDA);
+    const portfolio = await routerClient.getPortfolio(wallet.publicKey);
 
     if (!portfolio) {
       spinner.fail();
@@ -184,8 +183,10 @@ export async function createSlabCommand(options: CreateSlabOptions): Promise<voi
       process.exit(1);
     }
 
-    // Build initialize slab instruction
+    // Build slab initialization transaction
+    // Note: The slab program will create the PDA account if it doesn't exist
     spinner.text = 'Building slab initialization transaction...';
+
     const initSlabIx = slabClient.buildInitializeSlabInstruction(
       wallet.publicKey,   // lpOwner
       routerProgramId,    // routerId
