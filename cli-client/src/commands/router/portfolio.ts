@@ -5,6 +5,7 @@ import { displayError, formatAmount, formatPublicKey } from '../../utils/display
 import chalk from 'chalk';
 import ora from 'ora';
 import Table from 'cli-table3';
+import BN from 'bn.js';
 
 interface PortfolioOptions {
   address?: string;
@@ -115,15 +116,107 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       console.log(chalk.bold('\n📍 Trading Positions\n'));
 
       const exposuresTable = new Table({
-        head: ['Slab', 'Instrument', 'Position Qty'],
-        colWidths: [10, 15, 20],
+        head: ['Slab', 'Instrument', 'Position Qty', 'Mark Price', 'Notional Value'],
+        colWidths: [45, 45, 15, 15, 18],
       });
 
+      // Resolve slab addresses from registry
+      spinner.start('Resolving slab addresses from registry...');
+      const registry = await client.getRegistry();
+
+      if (!registry) {
+        spinner.fail('Registry not found');
+        console.log(chalk.red('\nError: Router registry not initialized'));
+        process.exit(1);
+      }
+
+      spinner.succeed(`Registry loaded with ${registry.slabs.length} registered slabs`);
+
+      // Debug: log registry contents
+      console.log(chalk.gray('\nRegistry contents:'));
+      for (let i = 0; i < Math.min(5, registry.slabs.length); i++) {
+        const entry = registry.slabs[i];
+        console.log(chalk.gray(`  [${i}] ${entry.slabId.toBase58()} (active: ${entry.active})`));
+      }
+      console.log();
+
+      // Import SlabClient for fetching instrument info
+      const { SlabClient } = await import('@barista-dex/sdk');
+      const slabClient = new SlabClient(connection, new PublicKey(config.slabProgramId));
+
       for (const exp of portfolio.exposures) {
+        console.log(chalk.gray(`Looking up position: slabIndex=${exp.slabIndex}, instrumentIndex=${exp.instrumentIndex}, qty=${exp.positionQty.toString()}`));
+
+        // Resolve slab address from registry index
+        const slabEntry = registry.slabs[exp.slabIndex];
+        console.log(chalk.gray(`  slabEntry: ${slabEntry ? `${slabEntry.slabId.toBase58()} (active=${slabEntry.active})` : 'undefined'}`));
+
+        const slabAddress = slabEntry && slabEntry.active
+          ? slabEntry.slabId.toBase58()
+          : `Unknown (Index ${exp.slabIndex})`;
+
+        // Fetch instrument address and price
+        let instrumentAddress = `Unknown (Index ${exp.instrumentIndex})`;
+        let markPrice = new BN(0);
+        let notionalValue = '—';
+
+        if (slabEntry && slabEntry.active) {
+          try {
+            const instruments = await slabClient.getInstruments(slabEntry.slabId);
+            if (instruments.length > exp.instrumentIndex) {
+              instrumentAddress = instruments[exp.instrumentIndex].pubkey.toBase58();
+            }
+
+            // For localnet, read live oracle price (updated by keeper with CoinGecko feed)
+            // For mainnet/devnet, use mark_px from slab state (static initialization value)
+            if (config.cluster === 'localnet') {
+              // Fetch oracle price directly
+              try {
+                const oracleAccountInfo = await connection.getAccountInfo(slabEntry.oracleId);
+                if (oracleAccountInfo && oracleAccountInfo.data.length >= 128) {
+                  const data = oracleAccountInfo.data;
+
+                  // Deserialize PriceOracle struct:
+                  // - magic (u64): 8 bytes
+                  // - version (u8): 1 byte
+                  // - bump (u8): 1 byte
+                  // - _padding: 6 bytes
+                  // - authority (Pubkey): 32 bytes
+                  // - instrument (Pubkey): 32 bytes
+                  // - price (i64): 8 bytes at offset 80
+                  const priceOffset = 80;
+                  markPrice = new BN(data.readBigInt64LE(priceOffset).toString());
+                }
+              } catch (oracleErr) {
+                console.error(chalk.yellow(`  Warning: Failed to read oracle price: ${oracleErr}`));
+              }
+            } else {
+              // For mainnet/devnet, use mark_px from slab state
+              const slabState = await slabClient.getSlabState(slabEntry.slabId);
+              if (slabState && slabState.markPx) {
+                markPrice = slabState.markPx;
+              }
+            }
+
+            // Calculate notional value if we have a price
+            if (!markPrice.isZero()) {
+              // position_qty * mark_price (both in 1e6 scale)
+              // Result needs to be divided by 1e6 to get actual value
+              const notional = exp.positionQty.mul(markPrice).div(new BN(1_000_000));
+              notionalValue = formatAmount(notional);
+            }
+          } catch (err) {
+            // Fallback to unknown if fetch fails
+            instrumentAddress = `Unknown (Index ${exp.instrumentIndex})`;
+          }
+        }
+
         exposuresTable.push([
-          exp.slabIndex.toString(),
-          exp.instrumentIndex.toString(),
+          slabAddress,
+          instrumentAddress,
           formatAmount(exp.positionQty),
+          markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
+          notionalValue,
         ]);
       }
 
