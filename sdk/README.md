@@ -213,7 +213,140 @@ async function checkPortfolioHealth() {
 }
 ```
 
-### 3. Trading
+### 3. Leverage Trading
+
+Barista DEX supports 1-10x leverage on all trades. Leverage allows traders to control larger positions with less collateral.
+
+#### Leverage Model
+
+- **1 unit = 1 contract = 1 underlying asset** (e.g., 1 SOL, 1 BTC)
+- **Quantity input = Margin to commit** (not position size)
+- **Actual position = Margin × Leverage**
+- **Price is irrelevant for margin** - only quantity matters
+
+#### Collateral Management
+
+When opening or increasing a position:
+1. **Upfront Transfer**: Collateral transfers from user portfolio → DLP portfolio
+2. **Margin Formula**: `margin = (quantity × 1e9) / leverage` lamports
+3. **Example**: 5 contracts at 5x = (5 × 1e9) / 5 = 1 SOL transferred
+
+When closing a position:
+- PnL settles between user and DLP
+- **Profit**: DLP → User
+- **Loss**: User → DLP (collateral already held by DLP)
+
+#### Initial Margin Requirements
+
+| Leverage | IMR | Example (5 contracts) |
+|----------|-----|----------------------|
+| 1x (spot) | 100% | 5 SOL margin |
+| 5x | 20% | 1 SOL margin |
+| 10x | 10% | 0.5 SOL margin |
+
+Formula: `IMR = 100% / leverage`
+
+#### Example: Leveraged Trading
+
+```typescript
+import { RouterClient } from '@barista-dex/sdk';
+import BN from 'bn.js';
+
+// Open 5x leveraged position
+async function openLeveragedPosition() {
+  const slabMarket = new PublicKey('SlabAddress');
+  const oracle = new PublicKey('OracleAddress');
+
+  // Input: 1 unit margin
+  const quantity = new BN(1_000_000); // 1.0 units in 1e6 scale
+  const leverage = 5;
+
+  // Validate position before executing
+  const validation = await router.validateLeveragedPosition(
+    wallet.publicKey,
+    quantity,
+    new BN(200_000_000), // $200 price (for display only)
+    leverage
+  );
+
+  console.log('Margin committed:', validation.marginCommitted.toString()); // 1,000,000 units
+  console.log('Actual position:', validation.actualQuantity.toString());   // 5,000,000 units (5 contracts)
+  console.log('Position size:', validation.positionSize.toString());       // $1000 (5 × $200)
+  console.log('Available equity:', validation.availableEquity.toString()); // e.g., 50,000,000 units (50 SOL)
+  console.log('Valid:', validation.valid); // true if equity >= margin
+
+  if (!validation.valid) {
+    throw new Error('Insufficient collateral');
+  }
+
+  // Execute buy with leverage
+  const price = new BN(200_000_000); // $200 limit price
+  const { instruction, receiptSetup, receiptKeypair } = await router.buildBuyInstruction(
+    wallet.publicKey,
+    slabMarket,
+    validation.actualQuantity, // 5 contracts (leveraged)
+    price,
+    oracle,
+    0, // 0 = market order, 1 = limit order
+    leverage // 1-10x
+  );
+
+  // Send transaction
+  const tx = new Transaction()
+    .add(receiptSetup)
+    .add(instruction);
+
+  const signature = await connection.sendTransaction(tx, [wallet, receiptKeypair]);
+  await connection.confirmTransaction(signature);
+
+  console.log('Position opened!');
+  console.log('Signature:', signature);
+
+  // After execution:
+  // - 1 SOL transferred from user portfolio → DLP portfolio
+  // - User controls 5 SOL worth of position
+  // - IMR locked: ~0.2 SOL (20% of 1 SOL margin)
+}
+```
+
+#### Position Sizing Helpers
+
+```typescript
+// Calculate actual quantity for leverage
+const marginInput = new BN(1_000_000); // 1 unit
+const leverage = 10;
+const actualQty = router.calculateActualQuantity(
+  marginInput,
+  new BN(100_000_000), // price (not used in calculation)
+  leverage
+);
+console.log(actualQty.toString()); // 10,000,000 (10 contracts)
+
+// Calculate position notional value
+const marginCommitted = new BN(2_000_000); // 2 units
+const positionSize = router.calculatePositionSize(marginCommitted, 5);
+console.log(positionSize.toString()); // 10,000,000 (10 units at 5x)
+```
+
+#### Risk Management
+
+```typescript
+// Check portfolio health before trading
+const portfolio = await router.getPortfolio(wallet.publicKey);
+
+// Equity must exceed Initial Margin
+const hasSufficientMargin = portfolio.equity >= portfolio.im;
+
+// Avoid liquidation - maintain health above Maintenance Margin
+const healthRatio = portfolio.equity / portfolio.mm;
+console.log('Health ratio:', healthRatio); // Should be > 1.0
+
+if (healthRatio < 1.2) {
+  console.warn('⚠️ Close to liquidation! Consider reducing leverage.');
+}
+```
+
+### 4. Trading
 
 #### Smart Routing (Automatic Best Execution)
 
