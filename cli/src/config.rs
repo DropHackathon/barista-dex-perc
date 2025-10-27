@@ -52,15 +52,60 @@ impl NetworkConfig {
 
         let keypair = load_keypair(&keypair_path)?;
 
-        // Use deployed program IDs (from /tmp/deployment_summary.md)
-        let router_program_id = Pubkey::from_str("DnStBYxRB5PVRueXzoaZmnakb4kZga3kywDKg8yqjsEX")
-            .expect("Invalid router program ID");
-        let slab_program_id = Pubkey::from_str("9e27KmcW24ME7nNzk6Xd3h7ssJhiMU2EaLtGbxDXK5Li")
-            .expect("Invalid slab program ID");
-        let amm_program_id = Pubkey::from_str("E2L2kaCF7RUs8gW7nW4Jpcy3J1NpVVjEQD5zmiD35YVs")
-            .expect("Invalid AMM program ID");
-        let oracle_program_id = Pubkey::from_str("My3wc35Vt13mStsd7tGi346ydXeXowTe95YJhRqWrtS")
-            .expect("Invalid oracle program ID");
+        // Get program IDs from environment variables for localnet, otherwise use defaults
+        let (router_program_id, slab_program_id, amm_program_id, oracle_program_id) =
+            if network == "localnet" || network == "local" {
+                // For localnet, read from environment variables
+                let router = std::env::var("BARISTA_LOCALNET_ROUTER_PROGRAM_ID")
+                    .ok()
+                    .and_then(|s| Pubkey::from_str(&s).ok())
+                    .unwrap_or_else(|| {
+                        eprintln!("Warning: BARISTA_LOCALNET_ROUTER_PROGRAM_ID not set, using default");
+                        Pubkey::from_str("DnStBYxRB5PVRueXzoaZmnakb4kZga3kywDKg8yqjsEX")
+                            .expect("Invalid default router program ID")
+                    });
+
+                let slab = std::env::var("BARISTA_LOCALNET_SLAB_PROGRAM_ID")
+                    .ok()
+                    .and_then(|s| Pubkey::from_str(&s).ok())
+                    .unwrap_or_else(|| {
+                        eprintln!("Warning: BARISTA_LOCALNET_SLAB_PROGRAM_ID not set, using default");
+                        Pubkey::from_str("9e27KmcW24ME7nNzk6Xd3h7ssJhiMU2EaLtGbxDXK5Li")
+                            .expect("Invalid default slab program ID")
+                    });
+
+                let amm = std::env::var("BARISTA_LOCALNET_AMM_PROGRAM_ID")
+                    .ok()
+                    .and_then(|s| Pubkey::from_str(&s).ok())
+                    .unwrap_or_else(|| {
+                        Pubkey::from_str("E2L2kaCF7RUs8gW7nW4Jpcy3J1NpVVjEQD5zmiD35YVs")
+                            .expect("Invalid default AMM program ID")
+                    });
+
+                let oracle = std::env::var("BARISTA_ORACLE_PROGRAM")
+                    .ok()
+                    .and_then(|s| Pubkey::from_str(&s).ok())
+                    .unwrap_or_else(|| {
+                        eprintln!("Warning: BARISTA_ORACLE_PROGRAM not set, using default");
+                        Pubkey::from_str("My3wc35Vt13mStsd7tGi346ydXeXowTe95YJhRqWrtS")
+                            .expect("Invalid default oracle program ID")
+                    });
+
+                (router, slab, amm, oracle)
+            } else {
+                // For devnet/mainnet, use hardcoded deployed IDs
+                // TODO: Update these after deployment to devnet/mainnet
+                let router = Pubkey::from_str("DnStBYxRB5PVRueXzoaZmnakb4kZga3kywDKg8yqjsEX")
+                    .expect("Invalid router program ID");
+                let slab = Pubkey::from_str("9e27KmcW24ME7nNzk6Xd3h7ssJhiMU2EaLtGbxDXK5Li")
+                    .expect("Invalid slab program ID");
+                let amm = Pubkey::from_str("E2L2kaCF7RUs8gW7nW4Jpcy3J1NpVVjEQD5zmiD35YVs")
+                    .expect("Invalid AMM program ID");
+                let oracle = Pubkey::from_str("My3wc35Vt13mStsd7tGi346ydXeXowTe95YJhRqWrtS")
+                    .expect("Invalid oracle program ID");
+
+                (router, slab, amm, oracle)
+            };
 
         Ok(Self {
             network: network.to_string(),

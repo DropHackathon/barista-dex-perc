@@ -86,6 +86,21 @@ cargo build --release
 # Note: CLI tools will be installed from npm (see Step 4 and Step 5)
 ```
 
+### 3. Environment Variables Reference
+
+After deploying programs (Step 2), you'll need to configure these environment variables:
+
+| Variable | Required? | Description | When to Set |
+|----------|-----------|-------------|-------------|
+| `BARISTA_LOCALNET_ROUTER_PROGRAM_ID` | **Yes** | Router program ID from deployment | After Step 2 |
+| `BARISTA_LOCALNET_SLAB_PROGRAM_ID` | **Yes** | Slab program ID from deployment | After Step 2 |
+| `BARISTA_ORACLE_PROGRAM` | **Yes** | Oracle program ID (for percolator-keeper) | After Step 2 |
+| `BARISTA_LOCALNET_RPC` | No | RPC endpoint (default: `http://localhost:8899`) | Optional |
+| `BARISTA_DLP_KEYPAIR` | No | DLP wallet path (convenience for cli-dlp) | After Step 4.1 |
+| `BARISTA_DLP_NETWORK` | No | Network name (convenience for cli-dlp) | After Step 4.1 |
+
+**These will be set in Step 2 after deploying programs.**
+
 ---
 
 ## Step 1: Start Localnet
@@ -155,6 +170,31 @@ solana program deploy target/deploy/percolator_oracle.so
 
 **Important**: Save all three program IDs - you'll need them for the next steps.
 
+### Configure Environment Variables
+
+After deploying the programs, configure environment variables so the CLI tools can find them:
+
+```bash
+# Add these to your ~/.bashrc, ~/.zshrc, or export them in your terminal session
+
+# Required: Program IDs from deployment
+export BARISTA_LOCALNET_ROUTER_PROGRAM_ID=<ROUTER_PROGRAM_ID>
+export BARISTA_LOCALNET_SLAB_PROGRAM_ID=<SLAB_PROGRAM_ID>
+
+# Optional: RPC endpoint (defaults to http://localhost:8899 if not set)
+export BARISTA_LOCALNET_RPC=http://localhost:8899
+
+# For percolator-keeper binary (oracle operations)
+export BARISTA_ORACLE_PROGRAM=<ORACLE_PROGRAM_ID>
+
+# Verify configuration
+echo "Router: $BARISTA_LOCALNET_ROUTER_PROGRAM_ID"
+echo "Slab: $BARISTA_LOCALNET_SLAB_PROGRAM_ID"
+echo "Oracle: $BARISTA_ORACLE_PROGRAM"
+```
+
+**Note**: The npm packages (@barista-dex/sdk, @barista-dex/cli-dlp, @barista-dex/cli-client) will automatically use these environment variables for localnet. Mainnet and devnet program IDs are hardcoded in the SDK.
+
 ---
 
 ## Step 3: Initialize Router Registry
@@ -162,17 +202,22 @@ solana program deploy target/deploy/percolator_oracle.so
 The router needs a registry account to track slabs:
 
 ```bash
-cd ../../cli
+cd cli
+
+# Ensure Solana CLI is configured to use localnet and your keypair
+solana config set --url localhost
+solana config set --keypair ~/.config/solana/id.json
 
 # Initialize registry
-cargo run -- init-registry \
-  --keypair ~/.config/solana/id.json \
-  --router-program <ROUTER_PROGRAM_ID> \
-  --network localnet
+cargo run -- init --name "Barista DEX"
 
 # Expected output:
 # ✓ Registry initialized at: <REGISTRY_ADDRESS>
+
+# Save the registry address for later use
 ```
+
+**Note**: The `percolator init` command uses your Solana CLI configuration for keypair and network. Make sure `solana config get` shows the correct settings.
 
 ---
 
@@ -210,9 +255,12 @@ barista-dlp --help
 # Or use npx (no installation required)
 npx @barista-dex/cli-dlp --help
 
-# Set environment variables for convenience
+# Optional: Set convenience variables to avoid passing --keypair and --network flags
 export BARISTA_DLP_KEYPAIR=~/.config/solana/dlp-wallet.json
 export BARISTA_DLP_NETWORK=localnet
+
+# Note: These are optional and specific to barista-dlp CLI convenience.
+# The program IDs must be set in Step 2 (BARISTA_LOCALNET_ROUTER_PROGRAM_ID, etc.)
 ```
 
 ### 4.3: Deposit Capital

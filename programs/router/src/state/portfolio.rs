@@ -74,6 +74,13 @@ pub struct Portfolio {
 impl Portfolio {
     pub const LEN: usize = core::mem::size_of::<Self>();
 
+    // Compile-time size check - will cause build to fail if size doesn't match
+    const _SIZE_CHECK: () = {
+        const EXPECTED: usize = 135056;
+        const ACTUAL: usize = core::mem::size_of::<Portfolio>();
+        const _: [(); ACTUAL] = [(); EXPECTED];
+    };
+
     /// Initialize portfolio in-place (avoids stack allocation)
     ///
     /// This method initializes the portfolio fields directly without creating
