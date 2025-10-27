@@ -6,26 +6,57 @@
 
 ## Problem Statement
 
-Currently, the Barista DEX router does **not properly track PnL** for trading positions:
+Currently, the Barista DEX router does **NOT track PnL at all** - neither realized nor unrealized:
 
 ### Current Issues:
 
 1. **No Entry Price Tracking**: The `Portfolio.exposures` array only stores `(slab_idx, instrument_idx, position_qty)` - no entry price
-2. **Broken Realized PnL**: When closing positions, the code uses the **closing trade's price** as the entry price, resulting in PnL ≈ 0
+2. **Broken Realized PnL Calculation**: When closing positions, the code uses the **closing trade's price** as the entry price
    - See: `programs/router/src/instructions/execute_cross_slab.rs:414`
    - Code: `split.limit_px // Use limit price as approximate entry price` ❌ WRONG!
-3. **No Unrealized PnL**: Open positions have no way to calculate mark-to-market PnL
-4. **Portfolio.pnl Field Useless**: Shows 0 for users with open positions
+   - Result: `realized_pnl = qty × (close_price - close_price) ≈ 0`
+   - Line 570 updates: `portfolio.pnl += 0` (adding zero!)
+3. **Realized PnL Always Zero**: Even though code updates `portfolio.pnl` (line 570), the calculated value is always ≈ 0
+4. **No Unrealized PnL**: Open positions have no way to calculate mark-to-market PnL
+5. **Portfolio.pnl Field Completely Broken**: Always shows 0 for all users
 
 ### What Users See:
 
 ```
 Unrealized PnL: 0.000000  ← Should show actual unrealized PnL
+Realized PnL: 0.000000    ← Should show accumulated realized PnL from closed trades
 Position: 2.0 BTC-PERP @ current $202.25
 Notional Value: $404.69
 Entry Price: ??? (not tracked)
-Unrealized PnL: ??? (can't calculate)
+Actual PnL: ??? (can't calculate - entry price unknown)
 ```
+
+### Example of Broken Behavior:
+
+**Scenario:**
+1. User opens long 2.0 BTC @ $200 (trade 1)
+2. Price moves to $210
+3. User closes 2.0 BTC @ $210 (trade 2)
+
+**Current Calculation (WRONG):**
+```rust
+realized_pnl = calculate_realized_pnl(
+    current_exposure: 2.0,
+    filled_qty: -2.0,
+    side: 1,  // sell
+    vwap_px: 210,      // trade 2 execution price ✓
+    split.limit_px: 210  // trade 2 limit price ❌ Should be 200!
+);
+// Result: 2.0 × ($210 - $210) = $0 ❌ COMPLETELY WRONG
+```
+
+**Correct Calculation (SHOULD BE):**
+```rust
+// Should use entry price from when position was opened
+realized_pnl = 2.0 × ($210 - $200) = $20 ✓
+```
+
+**Impact:** Users making profitable trades show $0 PnL!
 
 ## Root Cause Analysis
 
