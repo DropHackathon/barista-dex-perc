@@ -23,6 +23,8 @@ export async function createSlabCommand(options: CreateSlabOptions): Promise<voi
   const spinner = ora('Initializing...').start();
 
   try {
+    // Debug: log options
+
     // Load wallet
     if (!options.keypair) {
       spinner.fail();

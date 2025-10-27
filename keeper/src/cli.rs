@@ -24,6 +24,12 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: OracleCommands,
     },
+
+    /// Registry management commands
+    Registry {
+        #[command(subcommand)]
+        subcommand: RegistryCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -130,5 +136,27 @@ pub enum OracleCommands {
         /// Oracle program ID
         #[arg(long)]
         oracle_program: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RegistryCommands {
+    /// Initialize the SlabRegistry account
+    Init {
+        /// RPC URL
+        #[arg(short, long, default_value = "http://localhost:8899")]
+        rpc_url: String,
+
+        /// Keypair path (payer and default governance)
+        #[arg(short, long)]
+        keypair: String,
+
+        /// Governance authority (defaults to payer)
+        #[arg(short, long)]
+        governance: Option<String>,
+
+        /// Router program ID (defaults to env BARISTA_ROUTER_PROGRAM or hardcoded)
+        #[arg(long)]
+        router_program: Option<String>,
     },
 }

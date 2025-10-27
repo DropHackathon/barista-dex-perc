@@ -58,8 +58,8 @@ export async function depositCommand(options: DepositOptions): Promise<void> {
 
     // Check if portfolio exists
     spinner.text = 'Checking portfolio...';
-    const [portfolioPDA] = client.derivePortfolioPDA(wallet.publicKey);
-    const portfolioInfo = await connection.getAccountInfo(portfolioPDA);
+    const portfolioAddress = await client.derivePortfolioAddress(wallet.publicKey);
+    const portfolioInfo = await connection.getAccountInfo(portfolioAddress);
 
     const needsInit = !portfolioInfo;
 
@@ -94,7 +94,7 @@ export async function depositCommand(options: DepositOptions): Promise<void> {
     console.log();
     displaySuccess(`Deposited ${formatSolWithSuffix(amount)} to portfolio!`);
     console.log(chalk.gray(`  Signature: ${signature}`));
-    console.log(chalk.gray(`  Portfolio: ${portfolioPDA.toBase58()}`));
+    console.log(chalk.gray(`  Portfolio: ${portfolioAddress.toBase58()}`));
 
     if (needsInit) {
       console.log();

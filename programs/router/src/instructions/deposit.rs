@@ -7,7 +7,6 @@ use pinocchio::{
     instruction::{AccountMeta, Instruction},
     msg,
     program::invoke,
-    pubkey::Pubkey,
     ProgramResult,
 };
 

@@ -67,7 +67,7 @@ export function getRpcEndpoint(cluster: Cluster): string {
  * Maximum number of slabs in the registry
  * Source: programs/common/src/types.rs:6
  */
-export const MAX_SLABS = 256;
+export const MAX_SLABS = 16; // Reduced from 256 to fit within 10KB CPI allocation limit
 
 /**
  * Maximum number of instruments per slab
@@ -104,11 +104,11 @@ export const FP_ONE = 1_000_000_000;
 /**
  * Portfolio account size (exact)
  * This MUST match Portfolio::LEN from programs/router/src/state/portfolio.rs
- * Calculated as: size_of::<Portfolio>() = 135056 bytes
+ * Calculated as: size_of::<Portfolio>() = 12176 bytes (updated after MAX_SLABS reduced from 256 to 16)
  *
  * DO NOT use the calculated approximation below - use this exact value!
  */
-export const PORTFOLIO_SIZE = 135056;
+export const PORTFOLIO_SIZE = 12176;
 
 /**
  * Portfolio size calculation (for reference only - DO NOT USE)

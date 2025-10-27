@@ -55,17 +55,18 @@ pub fn process_initialize_registry(
     }
 
     // Check if account already exists and is initialized
-    if registry_account.lamports() > 0 {
-        // Account exists, check if already initialized
+    let data_len = {
+        let data = registry_account.try_borrow_data()
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+        data.len()
+    };
+
+    if data_len == SlabRegistry::LEN {
+        // Account is fully allocated, check if already initialized
         let data = registry_account.try_borrow_data()
             .map_err(|_| PercolatorError::InvalidAccount)?;
 
-        if data.len() != SlabRegistry::LEN {
-            msg!("Error: Registry account has incorrect size");
-            return Err(PercolatorError::InvalidAccount);
-        }
-
-        // Check if already initialized (router_id should be zero)
+        // Check if already initialized (router_id should be zero if uninitialized)
         let mut is_initialized = false;
         for i in 0..32 {
             if data[i] != 0 {
@@ -79,43 +80,133 @@ pub fn process_initialize_registry(
             return Err(PercolatorError::AlreadyInitialized);
         }
         drop(data);
-    } else {
-        // Account doesn't exist, create it via CPI
-        msg!("Creating registry PDA account");
+        // Account is allocated but not initialized, proceed to initialization below
+    } else if registry_account.lamports() > 0 && data_len == 0 {
+        // Account has lamports (funded by client) but no data - need to allocate and assign
+        msg!("Allocating registry PDA account");
 
-        // Calculate rent exemption
-        use pinocchio::sysvars::{rent::Rent, Sysvar};
-        let rent = Rent::get()?;
-        let lamports = rent.minimum_balance(SlabRegistry::LEN);
+        use pinocchio::program::invoke_signed;
+        use pinocchio::instruction::{Seed, Signer, AccountMeta, Instruction};
 
-        // Create PDA account via CPI
-        let create_account_ix = pinocchio::instruction::Instruction {
+        // Prepare PDA signer seeds
+        let bump_seed = [bump];
+        let seeds = [
+            Seed::from(b"registry" as &[u8]),
+            Seed::from(&bump_seed[..]),
+        ];
+
+        // Step 1: Allocate space (PDA must sign)
+        // System Program Allocate instruction: index 8, [space: u64]
+        let mut allocate_data = [0u8; 12];
+        allocate_data[0..4].copy_from_slice(&8u32.to_le_bytes()); // Allocate instruction index
+        allocate_data[4..12].copy_from_slice(&(SlabRegistry::LEN as u64).to_le_bytes());
+
+        let allocate_ix = Instruction {
             program_id: system_program.key(),
-            accounts: pinocchio::instruction::AccountMeta {
-                pubkey: payer.key(),
-                is_signer: true,
-                is_writable: true,
-            },
-            data: &[], // Will be populated by create_account syscall
+            accounts: &[
+                AccountMeta::writable_signer(registry_account.key()),
+            ],
+            data: &allocate_data,
         };
 
-        // Create account with PDA
+        let signer = Signer::from(&seeds);
+        invoke_signed(&allocate_ix, &[registry_account], &[signer])
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        // Step 2: Assign owner (PDA must sign)
+        // System Program Assign instruction: index 1, [owner: Pubkey]
+        let mut assign_data = [0u8; 36];
+        assign_data[0..4].copy_from_slice(&1u32.to_le_bytes()); // Assign instruction index
+        assign_data[4..36].copy_from_slice(program_id.as_ref());
+
+        let assign_ix = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta::writable_signer(registry_account.key()),
+            ],
+            data: &assign_data,
+        };
+
+        let signer = Signer::from(&seeds);
+        invoke_signed(&assign_ix, &[registry_account], &[signer])
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        msg!("Registry PDA account allocated and assigned");
+    } else if registry_account.lamports() == 0 {
+        // Account doesn't exist at all - create it via CPI
+        msg!("Creating registry PDA account via CPI");
+
+        use pinocchio::sysvars::{rent::Rent, Sysvar};
         use pinocchio::program::invoke_signed;
-        use pinocchio::sysvars::Sysvar;
+        use pinocchio::instruction::{Seed, Signer, AccountMeta, Instruction};
 
-        invoke_signed(
-            &pinocchio::system_instruction::create_account(
-                payer.key(),
-                registry_account.key(),
-                lamports,
-                SlabRegistry::LEN as u64,
-                program_id,
-            ),
-            &[payer.clone(), registry_account.clone(), system_program.clone()],
-            &[&[b"registry", &[bump]]],
-        )?;
+        let rent = Rent::get().map_err(|_| PercolatorError::InvalidAccount)?;
+        let lamports = rent.minimum_balance(SlabRegistry::LEN);
 
-        msg!("Registry PDA account created");
+        let bump_seed = [bump];
+        let seeds = [
+            Seed::from(b"registry" as &[u8]),
+            Seed::from(&bump_seed[..]),
+        ];
+
+        // Transfer lamports from payer to PDA
+        let mut transfer_data = [0u8; 12];
+        transfer_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer instruction
+        transfer_data[4..12].copy_from_slice(&lamports.to_le_bytes());
+
+        let transfer_ix = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta::writable_signer(payer.key()),
+                AccountMeta::writable(registry_account.key()),
+            ],
+            data: &transfer_data,
+        };
+
+        use pinocchio::program::invoke;
+        invoke(&transfer_ix, &[payer, registry_account])
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        // Allocate space
+        let mut allocate_data = [0u8; 12];
+        allocate_data[0..4].copy_from_slice(&8u32.to_le_bytes());
+        allocate_data[4..12].copy_from_slice(&(SlabRegistry::LEN as u64).to_le_bytes());
+
+        let allocate_ix = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta::writable_signer(registry_account.key()),
+            ],
+            data: &allocate_data,
+        };
+
+        let signer = Signer::from(&seeds);
+        invoke_signed(&allocate_ix, &[registry_account], &[signer])
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        // Assign owner
+        let mut assign_data = [0u8; 36];
+        assign_data[0..4].copy_from_slice(&1u32.to_le_bytes());
+        assign_data[4..36].copy_from_slice(program_id.as_ref());
+
+        let assign_ix = Instruction {
+            program_id: system_program.key(),
+            accounts: &[
+                AccountMeta::writable_signer(registry_account.key()),
+            ],
+            data: &assign_data,
+        };
+
+        let signer = Signer::from(&seeds);
+        invoke_signed(&assign_ix, &[registry_account], &[signer])
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        msg!("Registry PDA account created via CPI");
+    } else {
+        // Account exists with wrong size (e.g., from previous deployment with different MAX_SLABS)
+        // This can happen if the account was created with old size
+        msg!("Error: Registry account has wrong size - please close and recreate");
+        return Err(PercolatorError::InvalidAccount);
     }
 
     // Initialize the registry in-place (avoids stack overflow)

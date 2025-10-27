@@ -1,6 +1,6 @@
 {
   "name": "@barista-dex/cli-dlp",
-  "version": "0.1.23",
+  "version": "0.1.26",
   "description": "CLI for Barista DEX Liquidity Providers (DLPs)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -56,7 +56,7 @@
     "CHANGELOG.md"
   ],
   "dependencies": {
-    "@barista-dex/sdk": "^0.1.15",
+    "@barista-dex/sdk": "^0.1.24",
     "@solana/web3.js": "^1.87.0",
     "bn.js": "^5.2.1",
     "chalk": "^5.3.0",

@@ -205,49 +205,31 @@ See [REGISTRY_INITIALIZATION.md](./REGISTRY_INITIALIZATION.md) for detailed inst
 
 **Quick setup for localnet:**
 
-Create a TypeScript script `scripts/init-registry-localnet.ts`:
-
-```typescript
-import { Connection, Keypair, sendAndConfirmTransaction, Transaction } from '@solana/web3.js';
-import { RouterClient } from '@barista-dex/sdk';
-import fs from 'fs';
-
-const connection = new Connection('http://localhost:8899', 'confirmed');
-const deployerKeypair = Keypair.fromSecretKey(
-  new Uint8Array(JSON.parse(fs.readFileSync(process.env.HOME + '/.config/solana/id.json', 'utf-8')))
-);
-const ROUTER_PROGRAM_ID = new PublicKey('Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx');
-
-async function main() {
-  const client = new RouterClient(connection, ROUTER_PROGRAM_ID, deployerKeypair);
-
-  if (await client.isRegistryInitialized()) {
-    console.log('✓ Registry already initialized');
-    return;
-  }
-
-  const instructions = await client.buildInitializeRegistryInstructions(deployerKeypair.publicKey);
-  const tx = new Transaction().add(...instructions);
-  const sig = await sendAndConfirmTransaction(connection, tx, [deployerKeypair]);
-
-  console.log('✓ Registry initialized!');
-  console.log(`  PDA: ${client.deriveRegistryAddress().toBase58()}`);
-  console.log(`  Sig: ${sig}`);
-}
-
-main().catch(console.error);
-```
-
-Run it:
 ```bash
-ts-node scripts/init-registry-localnet.ts
+# Build keeper binary if not already built
+cargo build --release --bin percolator-keeper
+
+# Initialize registry
+./target/release/percolator-keeper registry init \
+  --keypair ~/.config/solana/id.json \
+  --rpc-url http://localhost:8899
+
+# Expected output:
+# ✓ Registry initialized successfully!
+#   Registry PDA: AjxXizziXXRneEskQ54GPYjKd8ChDGfma9ovG5mYKiey
+#   Governance: 3sEw2iqZEuBX9s9DeN8BcUpqaeRoi9BbziQT5QjRwAnN
+#   Signature: <TX_SIG>
 ```
+
+**Note**: The `registry init` subcommand needs to be added to percolator-keeper. See REGISTRY_INITIALIZATION.md for implementation details.
 
 ---
 
 ## Step 4: Setup DLP (Liquidity Provider)
 
 As the DLP, you'll provide liquidity and act as counterparty for all trades.
+
+**⚠️ CRITICAL**: You MUST set `BARISTA_DLP_KEYPAIR` environment variable before using barista-dlp commands. Due to Commander.js limitations, the `--keypair` flag doesn't work properly without this environment variable set.
 
 ### 4.1: Create DLP Wallet
 
@@ -258,6 +240,10 @@ solana-keygen new --outfile ~/.config/solana/dlp-wallet.json
 # Get the address
 solana-keygen pubkey ~/.config/solana/dlp-wallet.json
 # Save this: <DLP_PUBKEY>
+
+# ⚠️ CRITICAL: Set the environment variable NOW
+# Replace <YOUR_USER> with your actual username
+export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
 
 # Fund the wallet (1002 SOL: 1000 for capital + 2 for fees)
 solana airdrop 1002 <DLP_PUBKEY> --url localhost
@@ -279,19 +265,29 @@ barista-dlp --help
 # Or use npx (no installation required)
 npx @barista-dex/cli-dlp --help
 
-# Optional: Set convenience variables to avoid passing --keypair and --network flags
-export BARISTA_DLP_KEYPAIR=~/.config/solana/dlp-wallet.json
+# IMPORTANT: Set the DLP keypair environment variable
+# The CLI requires this due to Commander.js option parsing
+export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
+
+# Optional: Set network (defaults to localnet)
 export BARISTA_DLP_NETWORK=localnet
 
-# Note: These are optional and specific to barista-dlp CLI convenience.
+# Note: These environment variables are REQUIRED for barista-dlp CLI.
+# Without BARISTA_DLP_KEYPAIR set, the --keypair flag won't work properly.
 # The program IDs must be set in Step 2 (BARISTA_LOCALNET_ROUTER_PROGRAM_ID, etc.)
 ```
 
 ### 4.3: Deposit Capital
 
 ```bash
+# IMPORTANT: Ensure BARISTA_DLP_KEYPAIR is set first!
+# export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
+
 # Deposit 1000 SOL to DLP portfolio (auto-creates portfolio)
-barista-dlp deposit --amount 1000000000000
+barista-dlp deposit --amount 1000000000000 --network localnet
+
+# Note: --keypair is optional if BARISTA_DLP_KEYPAIR is set
+# If not set, the command will fail with "--keypair is required"
 
 # Expected output:
 # ✓ Portfolio initialized
@@ -324,15 +320,19 @@ solana-keygen pubkey ./btc-perp-instrument.json
 ### 4.5: Create Slab
 
 ```bash
-# Create slab interactively
-barista-dlp slab:create
+# IMPORTANT: Ensure BARISTA_DLP_KEYPAIR is set first!
+# export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
+
+# Create slab (commands updated - use dash instead of colon)
+barista-dlp slab-create
 
 # Or specify all parameters:
-barista-dlp slab:create \
+barista-dlp slab-create \
   --instrument <INSTRUMENT_ID> \
   --mark-price 50000.00 \
   --taker-fee 10 \
   --contract-size 1.0 \
+  --network localnet \
   --yes
 
 # Expected output:
@@ -343,7 +343,7 @@ barista-dlp slab:create \
 # ⚠ Save this slab address! You'll need it for trading
 
 # Verify slab
-barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
+barista-dlp slab-view --address <SLAB_ADDRESS> --detailed
 
 # Expected output:
 # ═══════════════════════════════════════
@@ -457,6 +457,8 @@ barista portfolio --keypair ~/.config/solana/trader2.json --network localnet
 
 Now you can simulate trading!
 
+**📝 Note for Localnet**: You must specify `--oracle <ORACLE_ADDRESS>` for all buy/sell commands on localnet. On mainnet/devnet, the oracle is looked up from the slab registry automatically (Pyth integration), but for localnet you need to pass it explicitly since we're using custom test oracles.
+
 ### 6.0: Check Oracle Price (Optional)
 
 Before trading, you can verify the current oracle price:
@@ -512,6 +514,7 @@ Barista DEX supports two order execution types:
 # Buy 1 BTC contract at market price
 barista buy \
   --slab <SLAB_ADDRESS> \
+  --oracle <ORACLE_ADDRESS> \
   --quantity 1 \
   --keypair ~/.config/solana/trader1.json \
   --network localnet
@@ -759,7 +762,7 @@ Create multiple trading pairs:
 solana-keygen new --no-bip39-passphrase --outfile ./sol-perp-instrument.json
 
 # Create slab for SOL-PERP
-barista-dlp slab:create \
+barista-dlp slab-create \
   --instrument $(solana-keygen pubkey ./sol-perp-instrument.json) \
   --mark-price 100.00 \
   --taker-fee 10 \
@@ -782,7 +785,7 @@ solana airdrop 502 $(solana-keygen pubkey ~/.config/solana/dlp2-wallet.json) --u
 barista-dlp deposit --amount 500000000000 --keypair ~/.config/solana/dlp2-wallet.json --network localnet
 
 # Create competing slab
-barista-dlp slab:create \
+barista-dlp slab-create \
   --instrument <SAME_INSTRUMENT_ID> \
   --mark-price 50000.00 \
   --taker-fee 5 \
@@ -902,7 +905,7 @@ solana transaction-history <ADDRESS> --url localhost
 
 ```bash
 # View slab details (DLP)
-barista-dlp slab:view --address <SLAB_ADDRESS> --detailed
+barista-dlp slab-view --address <SLAB_ADDRESS> --detailed
 ```
 
 ### Oracle Price Monitoring
@@ -925,6 +928,18 @@ watch -n 5 "barista price --oracle <ORACLE_ADDRESS> --network localnet"
 
 ## Troubleshooting
 
+### Issue: "--keypair is required" (for barista-dlp commands)
+
+**Solution**: Set the BARISTA_DLP_KEYPAIR environment variable
+```bash
+export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
+
+# Then retry your command
+barista-dlp deposit --amount 1000000000000 --network localnet
+```
+
+**Root cause**: Commander.js doesn't properly handle the `--keypair` option without the environment variable set as a default value. This is a known limitation.
+
 ### Issue: "Portfolio not found"
 
 **Solution**: Initialize portfolio first
@@ -943,7 +958,7 @@ solana airdrop 100 <ADDRESS> --url localhost
 
 **Solution**: Verify slab address
 ```bash
-barista-dlp slab:view --address <SLAB_ADDRESS> --network localnet
+barista-dlp slab-view --address <SLAB_ADDRESS> --network localnet
 ```
 
 ### Issue: "Cannot withdraw with open positions"
@@ -955,6 +970,26 @@ barista portfolio --keypair <KEYPAIR> --network localnet
 
 # Close positions (sell if long, buy if short)
 barista sell --slab <SLAB> -q <QUANTITY> -p <PRICE> --keypair <KEYPAIR> --network localnet
+```
+
+### Issue: "Error 0x2" (InvalidAccount) when trading
+
+**Solution**: The DLP portfolio doesn't exist for the slab's lp_owner. This happens when:
+1. The slab was created without the `BARISTA_DLP_KEYPAIR` environment variable set
+2. The slab was created with a different DLP keypair than the one that deposited funds
+
+**Fix**: Reset validator and recreate everything with `BARISTA_DLP_KEYPAIR` set:
+```bash
+# 1. Stop validator and reset
+solana-test-validator --reset
+
+# 2. Redeploy programs (see below)
+
+# 3. Set DLP keypair BEFORE creating slab
+export BARISTA_DLP_KEYPAIR=/Users/<YOUR_USER>/.config/solana/dlp-wallet.json
+
+# 4. Reinitialize registry, deposit, create slab
+# (Follow Steps 3-4 from the guide with the env var set)
 ```
 
 ### Issue: Programs not deployed

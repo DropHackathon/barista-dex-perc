@@ -957,17 +957,17 @@ export class RouterClient {
    * @param orderType Market (0) or Limit (1) order
    * @returns TransactionInstruction
    */
-  buildExecuteCrossSlabInstruction(
+  async buildExecuteCrossSlabInstruction(
     user: PublicKey,
     splits: SlabSplit[],
     orderType: ExecutionType = ExecutionType.Limit
-  ): TransactionInstruction {
+  ): Promise<TransactionInstruction> {
     // v0.5: Single slab only (cross-slab routing disabled)
     if (splits.length !== 1) {
       throw new Error('v0.5 only supports single slab execution (cross-slab routing disabled)');
     }
 
-    const [userPortfolioPDA] = this.derivePortfolioPDA(user);
+    const userPortfolioAddress = await this.derivePortfolioAddress(user);
     const [registryPDA] = this.deriveRegistryPDA();
     const [authorityPDA] = this.deriveAuthorityPDA();
 
@@ -976,7 +976,7 @@ export class RouterClient {
     if (!splits[0].dlpOwner) {
       throw new Error('DLP owner (lp_owner) must be provided in slab split');
     }
-    const [dlpPortfolioPDA] = this.derivePortfolioPDA(splits[0].dlpOwner);
+    const dlpPortfolioAddress = await this.derivePortfolioAddress(splits[0].dlpOwner);
 
     // Serialize instruction data:
     // - num_splits (u8)
@@ -1010,9 +1010,9 @@ export class RouterClient {
     // 6+n..6+2n. receipt_accounts (writable)
     // 6+2n..6+3n. oracle_accounts (readonly)
     const keys = [
-      { pubkey: userPortfolioPDA, isSigner: false, isWritable: true },
+      { pubkey: userPortfolioAddress, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: false },
-      { pubkey: dlpPortfolioPDA, isSigner: false, isWritable: true },
+      { pubkey: dlpPortfolioAddress, isSigner: false, isWritable: true },
       { pubkey: registryPDA, isSigner: false, isWritable: true },
       { pubkey: authorityPDA, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -1655,7 +1655,7 @@ export class RouterClient {
       dlpOwner, // Required for v0.5 PnL settlement
     };
 
-    return this.buildExecuteCrossSlabInstruction(user, [split], orderType);
+    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType);
   }
 
   /**
@@ -1700,6 +1700,6 @@ export class RouterClient {
       dlpOwner, // Required for v0.5 PnL settlement
     };
 
-    return this.buildExecuteCrossSlabInstruction(user, [split], orderType);
+    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType);
   }
 }

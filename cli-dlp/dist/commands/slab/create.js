@@ -16,6 +16,7 @@ const display_1 = require("../../utils/display");
 async function createSlabCommand(options) {
     const spinner = (0, ora_1.default)('Initializing...').start();
     try {
+        // Debug: log options
         // Load wallet
         if (!options.keypair) {
             spinner.fail();

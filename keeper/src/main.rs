@@ -13,7 +13,7 @@ mod tx_builder;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, OracleCommands};
+use cli::{Cli, Commands, OracleCommands, RegistryCommands};
 use config::Config;
 use priority_queue::{HealthQueue, UserHealth};
 use solana_client::rpc_client::RpcClient;
@@ -39,6 +39,9 @@ async fn main() -> Result<()> {
         }
         Commands::Oracle { subcommand } => {
             run_oracle_command(subcommand).await
+        }
+        Commands::Registry { subcommand } => {
+            run_registry_command(subcommand).await
         }
     }
 }
@@ -424,6 +427,107 @@ async fn run_oracle_command(subcommand: OracleCommands) -> Result<()> {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Run registry management command
+async fn run_registry_command(subcommand: RegistryCommands) -> Result<()> {
+    match subcommand {
+        RegistryCommands::Init {
+            rpc_url,
+            keypair,
+            governance,
+            router_program,
+        } => {
+            use solana_sdk::transaction::Transaction;
+            use solana_sdk::system_program;
+
+            let client = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::confirmed());
+
+            // Load payer keypair
+            let payer = load_keypair(&keypair)?;
+            log::info!("Payer: {}", payer.pubkey());
+
+            // Determine governance (defaults to payer)
+            let governance_pubkey = if let Some(gov_str) = governance {
+                gov_str.parse::<Pubkey>()
+                    .context("Invalid governance pubkey")?
+            } else {
+                payer.pubkey()
+            };
+            log::info!("Governance: {}", governance_pubkey);
+
+            // Determine router program ID
+            let router_program_id = if let Some(program_str) = router_program {
+                program_str.parse::<Pubkey>()
+                    .context("Invalid router program ID")?
+            } else if let Ok(env_program) = std::env::var("BARISTA_ROUTER_PROGRAM") {
+                env_program.parse::<Pubkey>()
+                    .context("Invalid BARISTA_ROUTER_PROGRAM env var")?
+            } else {
+                // Default to localnet program ID
+                "Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx"
+                    .parse::<Pubkey>()
+                    .unwrap()
+            };
+            log::info!("Router program: {}", router_program_id);
+
+            // Derive registry PDA
+            let (registry_pda, _bump) = Pubkey::find_program_address(
+                &[b"registry"],
+                &router_program_id,
+            );
+            log::info!("Registry PDA: {}", registry_pda);
+
+            // Check if already initialized
+            if let Ok(account) = client.get_account(&registry_pda) {
+                if account.owner == router_program_id && account.data.len() > 0 {
+                    log::info!("✓ Registry already initialized");
+                    println!("✓ Registry already initialized");
+                    println!("  Registry PDA: {}", registry_pda);
+                    println!("  Owner: {}", account.owner);
+                    return Ok(());
+                }
+            }
+
+            // With MAX_SLABS reduced to 16, SlabRegistry is now <10KB
+            // Router program can create it via CPI
+            log::info!("Initializing registry (router will create account via CPI)...");
+
+            use solana_sdk::system_instruction;
+
+            // Build Initialize instruction - program will create account
+            let mut instruction_data = vec![0u8]; // discriminator = 0
+            instruction_data.extend_from_slice(governance_pubkey.as_ref());
+
+            let initialize_ix = solana_sdk::instruction::Instruction {
+                program_id: router_program_id,
+                accounts: vec![
+                    solana_sdk::instruction::AccountMeta::new(registry_pda, false),
+                    solana_sdk::instruction::AccountMeta::new(payer.pubkey(), true),
+                    solana_sdk::instruction::AccountMeta::new_readonly(system_program::id(), false),
+                ],
+                data: instruction_data,
+            };
+
+            let recent_blockhash = client.get_latest_blockhash()?;
+            let transaction = Transaction::new_signed_with_payer(
+                &[initialize_ix],
+                Some(&payer.pubkey()),
+                &[&payer],
+                recent_blockhash,
+            );
+
+            log::info!("Sending initialize registry transaction...");
+            let signature = client.send_and_confirm_transaction(&transaction)?;
+
+            println!("✓ Registry initialized successfully!");
+            println!("  Registry PDA: {}", registry_pda);
+            println!("  Governance: {}", governance_pubkey);
+            println!("  Signature: {}", signature);
+
+            Ok(())
         }
     }
 }

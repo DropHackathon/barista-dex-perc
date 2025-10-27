@@ -3,7 +3,7 @@
 use pinocchio::pubkey::Pubkey;
 
 /// Maximum number of slabs in the registry
-pub const MAX_SLABS: usize = 256;
+pub const MAX_SLABS: usize = 16; // Reduced from 256 to fit within 10KB CPI allocation limit
 
 /// Maximum number of instruments per slab
 pub const MAX_INSTRUMENTS: usize = 32;

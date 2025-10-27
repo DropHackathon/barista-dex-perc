@@ -44,7 +44,7 @@ program
   .action(viewCommand);
 
 program
-  .command('portfolio:init')
+  .command('portfolio-init')
   .description('Initialize a new DLP portfolio')
   .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
   .option('--network <network>', 'Network to use', process.env.BARISTA_DLP_NETWORK || 'localnet')
@@ -72,7 +72,7 @@ program
 
 // Slab commands
 program
-  .command('slab:create')
+  .command('slab-create')
   .description('Create a new slab')
   .option('--instrument <address>', 'Instrument (perp market) address')
   .option('--mark-price <price>', 'Mark price in USD (e.g., 100.50)')
@@ -85,7 +85,7 @@ program
   .action(createSlabCommand);
 
 program
-  .command('slab:view')
+  .command('slab-view')
   .description('View slab details')
   .requiredOption('--address <pubkey>', 'Slab address')
   .option('--keypair <path>', 'Path to DLP wallet keypair', process.env.BARISTA_DLP_KEYPAIR)
@@ -105,8 +105,8 @@ if (process.argv.length === 2) {
   console.log('  portfolio        View portfolio details');
   console.log('  deposit          Deposit SOL capital');
   console.log('  withdraw         Withdraw SOL');
-  console.log('  slab:create      Create a new slab');
-  console.log('  slab:view        View slab details');
+  console.log('  slab-create      Create a new slab');
+  console.log('  slab-view        View slab details');
   console.log('\nFor oracle management, use percolator-keeper:');
   console.log('  percolator-keeper oracle init --instrument BTC-PERP --price 50000');
   console.log('  percolator-keeper oracle crank --oracle <address> --interval 5');

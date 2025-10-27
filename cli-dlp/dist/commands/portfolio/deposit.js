@@ -48,8 +48,8 @@ async function depositCommand(options) {
         const client = new sdk_1.RouterClient(connection, routerProgramId, wallet);
         // Check if portfolio exists
         spinner.text = 'Checking portfolio...';
-        const [portfolioPDA] = client.derivePortfolioPDA(wallet.publicKey);
-        const portfolioInfo = await connection.getAccountInfo(portfolioPDA);
+        const portfolioAddress = await client.derivePortfolioAddress(wallet.publicKey);
+        const portfolioInfo = await connection.getAccountInfo(portfolioAddress);
         const needsInit = !portfolioInfo;
         // Build transaction
         spinner.text = needsInit ? 'Creating portfolio and depositing...' : 'Building deposit transaction...';
@@ -75,7 +75,7 @@ async function depositCommand(options) {
         console.log();
         (0, display_1.displaySuccess)(`Deposited ${(0, display_1.formatSolWithSuffix)(amount)} to portfolio!`);
         console.log(chalk_1.default.gray(`  Signature: ${signature}`));
-        console.log(chalk_1.default.gray(`  Portfolio: ${portfolioPDA.toBase58()}`));
+        console.log(chalk_1.default.gray(`  Portfolio: ${portfolioAddress.toBase58()}`));
         if (needsInit) {
             console.log();
             console.log(chalk_1.default.blue('ℹ'), 'Portfolio created successfully (first-time setup)');

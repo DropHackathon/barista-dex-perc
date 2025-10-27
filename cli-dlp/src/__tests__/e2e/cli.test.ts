@@ -62,7 +62,7 @@ describe('CLI E2E Tests', () => {
     it('should show version with --version', async () => {
       const { stdout } = await execAsync('npm run barista-dlp -- --version');
 
-      expect(stdout).toContain('0.1.23');
+      expect(stdout).toContain('0.1.26');
     });
 
     it('should show welcome message with no args', async () => {
@@ -141,7 +141,8 @@ describe('CLI E2E Tests', () => {
         await execAsync(cmd);
         fail('Should have thrown error');
       } catch (error: any) {
-        expect(error.stdout || error.stderr).toContain('keypair');
+        // CLI requires --keypair parameter
+        expect(error.stdout || error.stderr).toContain('--keypair is required');
       }
     });
 

@@ -84,7 +84,8 @@ describe('RouterClient', () => {
     describe('buildInitializeInstruction', () => {
       it('should build valid instruction', () => {
         const payer = wallet.publicKey;
-        const ix = client.buildInitializeInstruction(payer);
+        const governance = PublicKey.unique();
+        const ix = client.buildInitializeInstruction(payer, governance);
 
         expect(ix.programId.equals(programId)).toBe(true);
         expect(ix.keys.length).toBe(5);
@@ -128,7 +129,7 @@ describe('RouterClient', () => {
     });
 
     describe('buildExecuteCrossSlabInstruction', () => {
-      it('should build valid instruction with single split (v0.5)', () => {
+      it('should build valid instruction with single split (v0.5)', async () => {
         const user = wallet.publicKey;
         const dlpOwner = PublicKey.unique();
         const splits: SlabSplit[] = [
@@ -142,7 +143,7 @@ describe('RouterClient', () => {
           },
         ];
 
-        const ix = client.buildExecuteCrossSlabInstruction(user, splits);
+        const ix = await client.buildExecuteCrossSlabInstruction(user, splits);
 
         expect(ix.programId.equals(programId)).toBe(true);
         // v0.5: 6 base (user_portfolio, user, dlp_portfolio, registry, authority, system_program)
@@ -152,7 +153,7 @@ describe('RouterClient', () => {
         expect(ix.data[1]).toBe(1); // num_splits
       });
 
-      it('should throw error for multiple splits (v0.5 limitation)', () => {
+      it('should throw error for multiple splits (v0.5 limitation)', async () => {
         const user = wallet.publicKey;
         const dlpOwner = PublicKey.unique();
         const splits: SlabSplit[] = [
@@ -175,12 +176,12 @@ describe('RouterClient', () => {
         ];
 
         // v0.5: Cross-slab routing disabled
-        expect(() => {
-          client.buildExecuteCrossSlabInstruction(user, splits);
-        }).toThrow(/v0.5 only supports single slab execution/);
+        await expect(async () => {
+          await client.buildExecuteCrossSlabInstruction(user, splits);
+        }).rejects.toThrow(/v0.5 only supports single slab execution/);
       });
 
-      it('should throw error when dlpOwner is missing (v0.5)', () => {
+      it('should throw error when dlpOwner is missing (v0.5)', async () => {
         const user = wallet.publicKey;
         const splits: SlabSplit[] = [
           {
@@ -193,9 +194,9 @@ describe('RouterClient', () => {
           },
         ];
 
-        expect(() => {
-          client.buildExecuteCrossSlabInstruction(user, splits);
-        }).toThrow(/DLP owner .* must be provided/);
+        await expect(async () => {
+          await client.buildExecuteCrossSlabInstruction(user, splits);
+        }).rejects.toThrow(/DLP owner .* must be provided/);
       });
     });
 
