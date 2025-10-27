@@ -8,13 +8,20 @@ import { withdrawCommand } from './commands/portfolio/withdraw';
 import { createSlabCommand } from './commands/slab/create';
 import { viewSlabCommand } from './commands/slab/view';
 import chalk from 'chalk';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+// Read version from package.json
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, '../package.json'), 'utf-8')
+);
 
 const program = new Command();
 
 program
   .name('barista-dlp')
   .description('Barista DEX CLI for Liquidity Providers (DLPs)')
-  .version('0.1.15');
+  .version(packageJson.version);
 
 // Global options
 program
