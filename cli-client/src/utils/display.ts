@@ -14,6 +14,13 @@ export function formatAmount(amount: BN, decimals: number = 6): string {
 }
 
 /**
+ * Format SOL amount (lamports, 9 decimals)
+ */
+export function formatSol(amount: BN): string {
+  return formatAmount(amount, 9);
+}
+
+/**
  * Format price (default 6 decimals)
  */
 export function formatPrice(price: BN): string {

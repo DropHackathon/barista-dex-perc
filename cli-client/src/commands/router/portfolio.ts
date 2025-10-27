@@ -1,7 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 import { RouterClient, Cluster } from '@barista-dex/sdk';
 import { loadKeypair, getConfig, getDefaultKeypairPath } from '../../utils/wallet';
-import { displayError, formatAmount, formatPublicKey } from '../../utils/display';
+import { displayError, formatAmount, formatSol, formatPublicKey } from '../../utils/display';
 import chalk from 'chalk';
 import ora from 'ora';
 import Table from 'cli-table3';
@@ -84,20 +84,20 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       ['Bump', portfolio.bump.toString()],
       ['', ''],
       [chalk.bold('💰 Balance'), ''],
-      ['Equity', formatAmount(portfolio.equity)],
-      ['Principal (Deposits)', formatAmount(portfolio.principal)],
-      ['Free Collateral', formatAmount(portfolio.freeCollateral)],
+      ['Equity', formatSol(portfolio.equity)],
+      ['Principal (Deposits)', formatSol(portfolio.principal)],
+      ['Free Collateral', formatSol(portfolio.freeCollateral)],
       ['', ''],
       [chalk.bold('📈 PnL & Vesting'), ''],
-      ['Unrealized PnL', formatAmount(portfolio.pnl)],
-      ['Vested PnL', formatAmount(portfolio.vestedPnl)],
+      ['Total Realized PnL', formatSol(portfolio.pnl)],
+      ['Vested PnL', formatSol(portfolio.vestedPnl)],
       ['PnL Index Checkpoint', formatAmount(portfolio.pnlIndexCheckpoint)],
       ['Last Slot', portfolio.lastSlot.toString()],
       ['', ''],
       [chalk.bold('🛡️  Margin & Risk'), ''],
-      ['Initial Margin (IM)', formatAmount(portfolio.im)],
-      ['Maintenance Margin (MM)', formatAmount(portfolio.mm)],
-      ['Health', formatAmount(portfolio.health)],
+      ['Initial Margin (IM)', formatSol(portfolio.im)],
+      ['Maintenance Margin (MM)', formatSol(portfolio.mm)],
+      ['Health', formatSol(portfolio.health)],
       ['Last Mark Timestamp', portfolio.lastMarkTs.toString()],
       ['', ''],
       [chalk.bold('⚠️  Liquidation'), ''],
