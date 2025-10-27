@@ -71,6 +71,7 @@ pub fn process_liquidate_user(
     vault: &mut Vault,
     router_authority: &AccountInfo,
     system_program: &AccountInfo,
+    slab_program: &AccountInfo,
     oracle_accounts: &[AccountInfo],
     slab_accounts: &[AccountInfo],
     receipt_accounts: &[AccountInfo],
@@ -242,6 +243,7 @@ pub fn process_liquidate_user(
         registry,
         router_authority,
         system_program,
+        slab_program,
         &slab_accounts[..plan.split_count],
         &receipt_accounts[..plan.split_count],
         &oracle_accounts[..plan.split_count], // Pass oracles for validation

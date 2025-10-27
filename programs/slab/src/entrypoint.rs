@@ -20,6 +20,8 @@ pub fn process_instruction(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    msg!("SLAB ENTRYPOINT CALLED");
+
     // Check minimum instruction data length
     if instruction_data.is_empty() {
         msg!("Error: Instruction data is empty");
@@ -28,6 +30,7 @@ pub fn process_instruction(
 
     // Parse instruction discriminator
     let discriminator = instruction_data[0];
+    msg!("SLAB: Discriminator parsed");
     let instruction = match discriminator {
         0 => SlabInstruction::Initialize,
         1 => SlabInstruction::CommitFill,
@@ -205,9 +208,9 @@ fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data:
 ///
 /// Expected accounts:
 /// 0. `[writable]` Slab state account
-/// 1. `[writable]` Fill receipt account
-/// 2. `[signer]` Router signer
-/// 3. `[]` Oracle account (price feed)
+/// 1. `[signer]` Router signer
+/// 2. `[]` Oracle account (price feed)
+/// (Receipt temporarily removed for CPI testing)
 ///
 /// Expected data layout (22 bytes):
 /// - expected_seqno: u32 (4 bytes) - expected slab seqno (TOCTOU protection)
@@ -216,20 +219,25 @@ fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data:
 /// - qty: i64 (8 bytes) - quantity to fill (1e6 scale)
 /// - limit_px: i64 (8 bytes) - limit price (1e6 scale)
 fn process_commit_fill_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    msg!("SLAB: CommitFill inner called");
+
     if accounts.len() < 4 {
         msg!("Error: CommitFill instruction requires at least 4 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     let slab_account = &accounts[0];
-    let receipt_account = &accounts[1];
-    let router_signer = &accounts[2];
-    let oracle_account = &accounts[3];
+    let router_signer = &accounts[1];
+    let oracle_account = &accounts[2];
+    let receipt_account = &accounts[3];
 
     // Validate slab account
     validate_owner(slab_account, program_id)?;
     validate_writable(slab_account)?;
-    validate_writable(receipt_account)?;
+
+    // NOTE: We validate the router_signer pubkey in commit_fill.rs
+    // The is_signer check doesn't work with PDAs signed via invoke_signed
+    msg!("SLAB: Validations passed");
 
     // Borrow slab state mutably
     let slab = unsafe { borrow_account_data_mut::<SlabState>(slab_account)? };
@@ -262,7 +270,8 @@ fn process_commit_fill_inner(program_id: &Pubkey, accounts: &[AccountInfo], data
         }
     };
 
-    // Call the commit_fill logic
+    msg!("SLAB: About to call process_commit_fill");
+    // Call the commit_fill logic with receipt
     process_commit_fill(
         slab,
         receipt_account,

@@ -1,6 +1,6 @@
 //! Commit fill instruction - v0 single-instruction orderbook interaction
 
-use crate::state::{SlabState, FillReceipt, QuoteCache, QuoteLevel};
+use crate::state::{SlabState, QuoteCache, QuoteLevel};
 use percolator_common::*;
 use pinocchio::{account_info::AccountInfo, msg, pubkey::Pubkey};
 
@@ -83,6 +83,8 @@ pub fn process_commit_fill(
     qty: i64,
     limit_px: i64,
 ) -> Result<(), PercolatorError> {
+    msg!("SLAB: Inside process_commit_fill");
+
     // Verify router authority
     if &slab.header.router_id != router_signer {
         msg!("Error: Invalid router signer");
@@ -124,13 +126,29 @@ pub fn process_commit_fill(
     // For v0, add this as liquidity at the fill price
     update_quote_cache_after_fill(&mut slab.quote_cache, slab.header.seqno + 1, side, limit_px, filled_qty);
 
-    // Write receipt
-    let receipt = unsafe { percolator_common::borrow_account_data_mut::<FillReceipt>(receipt_account)? };
-    receipt.write(seqno_start, filled_qty, vwap_px, notional, fee);
-
     // Increment seqno (book changed)
     slab.header.increment_seqno();
 
+    // Write receipt for router to read
+    let signed_qty = match side {
+        Side::Buy => filled_qty,
+        Side::Sell => -filled_qty,
+    };
+
+    let mut receipt_data = receipt_account.try_borrow_mut_data()
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+
+    if receipt_data.len() < FillReceipt::LEN {
+        msg!("Error: Receipt account too small");
+        return Err(PercolatorError::InvalidAccount);
+    }
+
+    let receipt = unsafe {
+        &mut *(receipt_data.as_mut_ptr() as *mut FillReceipt)
+    };
+    receipt.write(seqno_start, signed_qty, vwap_px, notional, fee);
+
+    msg!("SLAB: Fill executed successfully, receipt written");
     msg!("CommitFill executed successfully");
     Ok(())
 }

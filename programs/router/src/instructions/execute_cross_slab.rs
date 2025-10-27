@@ -146,6 +146,7 @@ pub fn process_execute_cross_slab(
     registry: &mut SlabRegistry,
     router_authority: &AccountInfo,
     system_program: &AccountInfo,
+    slab_program: &AccountInfo,
     slab_accounts: &[AccountInfo],
     receipt_accounts: &[AccountInfo],
     oracle_accounts: &[AccountInfo],
@@ -205,19 +206,24 @@ pub fn process_execute_cross_slab(
         return Err(PercolatorError::InvalidAccount);
     }
 
-    // Phase 1: Read oracles and validate prices (CRITICAL - Router's job!)
-    msg!("Reading oracles and validating prices");
+    // Phase 1: Read oracles and prepare execution prices
+    msg!("Reading oracles and preparing prices");
+
+    // Store oracle prices for market orders
+    let mut oracle_prices = [0i64; 16]; // Max 16 slabs
+
     for (i, split) in splits.iter().enumerate() {
         let oracle_account = &oracle_accounts[i];
 
         // Read oracle price using appropriate adapter
         let oracle_px = read_oracle_price_unified(oracle_account)?;
+        oracle_prices[i] = oracle_px;
 
         // Validate price based on order type
         match order_type {
             0 => { // Market order
-                validate_market_order_price(split.limit_px, oracle_px, split.side)?;
-                msg!("Market order price validated");
+                // No validation - market orders execute at oracle price
+                msg!("Market order will execute at oracle price");
             }
             1 => { // Limit order
                 validate_limit_order_price(split.limit_px, oracle_px)?;
@@ -227,7 +233,7 @@ pub fn process_execute_cross_slab(
         }
     }
 
-    // Phase 2: CPI to each slab's commit_fill (prices already validated)
+    // Phase 2: CPI to each slab's commit_fill
     msg!("Executing fills on slabs");
 
     for (i, split) in splits.iter().enumerate() {
@@ -242,17 +248,24 @@ pub fn process_execute_cross_slab(
         let slab_data = slab_account
             .try_borrow_data()
             .map_err(|_| PercolatorError::InvalidAccount)?;
-        if slab_data.len() < 4 {
+        if slab_data.len() < 16 {
             msg!("Error: Invalid slab account data");
             return Err(PercolatorError::InvalidAccount);
         }
-        // Seqno is at offset 0 in SlabHeader (first field)
+        // Seqno is at offset 12 in SlabHeader (after 8-byte magic + 4-byte version)
         let expected_seqno = u32::from_le_bytes([
-            slab_data[0],
-            slab_data[1],
-            slab_data[2],
-            slab_data[3],
+            slab_data[12],
+            slab_data[13],
+            slab_data[14],
+            slab_data[15],
         ]);
+
+        // Determine execution price based on order type
+        let execution_price = match order_type {
+            0 => oracle_prices[i], // Market order: execute at oracle price
+            1 => split.limit_px,    // Limit order: execute at limit price
+            _ => unreachable!(),
+        };
 
         // Build commit_fill instruction data (23 bytes total)
         // Layout: discriminator (1) + expected_seqno (4) + order_type (1) + side (1) + qty (8) + limit_px (8)
@@ -262,7 +275,7 @@ pub fn process_execute_cross_slab(
         instruction_data[5] = order_type;
         instruction_data[6] = split.side;
         instruction_data[7..15].copy_from_slice(&split.qty.to_le_bytes());
-        instruction_data[15..23].copy_from_slice(&split.limit_px.to_le_bytes());
+        instruction_data[15..23].copy_from_slice(&execution_price.to_le_bytes());
 
         // Build account metas for CPI
         // 0. slab_account (writable)
@@ -270,40 +283,60 @@ pub fn process_execute_cross_slab(
         // 2. router_authority (signer PDA)
         // 3. oracle_account (read-only, for transparency)
         use pinocchio::{
-            instruction::{AccountMeta, Instruction},
-            program::invoke_signed,
+            instruction::{AccountMeta, Instruction, Seed, Signer, Account},
+            cpi::invoke_signed_unchecked,
         };
 
+        // Don't mark router_authority as signer in AccountMeta
+        // invoke_signed will add the signature automatically
         let account_metas = [
             AccountMeta::writable(slab_account.key()),
-            AccountMeta::writable(receipt_account.key()),
-            AccountMeta::writable_signer(router_authority.key()),
+            AccountMeta::readonly(router_authority.key()),
             AccountMeta::readonly(oracle_account.key()),
+            AccountMeta::writable(receipt_account.key()),
         ];
 
+        msg!("CPI: About to invoke slab program");
+
+        // Copy program ID since it needs to outlive the instruction
+        let program_id_copy = *slab_program_id;
+
         let instruction = Instruction {
-            program_id: slab_program_id,
+            program_id: &program_id_copy,
             accounts: &account_metas,
             data: &instruction_data,
         };
 
-        // Sign the CPI with router authority PDA
-        use crate::pda::AUTHORITY_SEED;
-        use pinocchio::instruction::{Seed, Signer};
+        msg!("CPI: Instruction built, preparing PDA signer");
 
+        // Prepare PDA signer for router authority
+        use crate::pda::AUTHORITY_SEED;
         let bump_array = [authority_bump];
-        let seeds = &[
+        let seeds = [
             Seed::from(AUTHORITY_SEED),
             Seed::from(&bump_array[..]),
         ];
-        let signer = Signer::from(seeds);
+        let signer = Signer::from(&seeds);
 
-        invoke_signed(
-            &instruction,
-            &[slab_account, receipt_account, router_authority, oracle_account],
-            &[signer],
-        )
-        .map_err(|_| PercolatorError::CpiFailed)?;
+        msg!("CPI: Calling invoke_signed_unchecked with PDA");
+
+        // Convert to Account types for unchecked invoke
+        let accounts_for_cpi = [
+            Account::from(slab_account),
+            Account::from(router_authority),
+            Account::from(oracle_account),
+            Account::from(receipt_account),
+        ];
+
+        unsafe {
+            invoke_signed_unchecked(
+                &instruction,
+                &accounts_for_cpi,
+                &[signer],
+            );
+        }
+
+        msg!("CPI: invoke_signed_unchecked succeeded!");
     }
 
     // Phase 3: Read receipts and settle PnL

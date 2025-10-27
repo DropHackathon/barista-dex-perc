@@ -254,9 +254,10 @@ fn process_initialize_portfolio_inner(program_id: &Pubkey, accounts: &[AccountIn
 /// 3. `[writable]` Registry account
 /// 4. `[]` Router authority PDA
 /// 5. `[]` System program (for SOL transfers)
-/// 6..6+N. `[writable]` Slab accounts (N = num_splits)
-/// 6+N..6+2N. `[writable]` Receipt PDAs (N = num_splits)
-/// 6+2N..6+3N. `[]` Oracle accounts (N = num_splits)
+/// 6. `[]` Slab program (for CPI)
+/// 7..7+N. `[writable]` Slab accounts (N = num_splits)
+/// 7+N..7+2N. `[writable]` Receipt PDAs (N = num_splits)
+/// 7+2N..7+3N. `[]` Oracle accounts (N = num_splits)
 ///
 /// Instruction data layout:
 /// - num_splits: u8 (1 byte)
@@ -269,8 +270,8 @@ fn process_initialize_portfolio_inner(program_id: &Pubkey, accounts: &[AccountIn
 /// Total size: 2 + (17 * num_splits) bytes
 /// Maximum splits: 8 (to avoid stack overflow, v0.5: only 1 slab supported)
 fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 6 {
-        msg!("Error: ExecuteCrossSlab requires at least 6 accounts");
+    if accounts.len() < 7 {
+        msg!("Error: ExecuteCrossSlab requires at least 7 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
@@ -280,6 +281,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
     let registry_account = &accounts[3];
     let router_authority = &accounts[4];
     let system_program = &accounts[5];
+    let slab_program = &accounts[6];
 
     // Validate accounts
     validate_owner(user_portfolio_account, program_id)?;
@@ -315,17 +317,17 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         return Err(PercolatorError::InvalidOrderType.into());
     }
 
-    // Verify we have enough accounts: 6 base + num_splits slabs + num_splits receipts + num_splits oracles
-    let required_accounts = 6 + (num_splits * 3);
+    // Verify we have enough accounts: 7 base + num_splits slabs + num_splits receipts + num_splits oracles
+    let required_accounts = 7 + (num_splits * 3);
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for ExecuteCrossSlab");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     // Split accounts into slabs, receipts, and oracles
-    let slab_accounts = &accounts[6..6 + num_splits];
-    let receipt_accounts = &accounts[6 + num_splits..6 + num_splits * 2];
-    let oracle_accounts = &accounts[6 + num_splits * 2..6 + num_splits * 3];
+    let slab_accounts = &accounts[7..7 + num_splits];
+    let receipt_accounts = &accounts[7 + num_splits..7 + num_splits * 2];
+    let oracle_accounts = &accounts[7 + num_splits * 2..7 + num_splits * 3];
 
     // Parse splits from instruction data (on stack, small)
     // Use a fixed-size buffer to avoid heap allocation
@@ -377,6 +379,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         registry,
         router_authority,
         system_program,
+        slab_program,
         slab_accounts,
         receipt_accounts,
         oracle_accounts,
@@ -395,9 +398,11 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
 /// 1. `[]` Registry account
 /// 2. `[writable]` Vault account
 /// 3. `[]` Router authority PDA
-/// 4..4+N. `[]` Oracle accounts (N = num_oracles)
-/// 4+N..4+N+M. `[writable]` Slab accounts (M = num_slabs)
-/// 4+N+M..4+N+2M. `[writable]` Receipt PDAs (M = num_slabs)
+/// 4. `[]` System program
+/// 5. `[]` Slab program (for CPI)
+/// 6..6+N. `[]` Oracle accounts (N = num_oracles)
+/// 6+N..6+N+M. `[writable]` Slab accounts (M = num_slabs)
+/// 6+N+M..6+N+2M. `[writable]` Receipt PDAs (M = num_slabs)
 ///
 /// Instruction data layout:
 /// - num_oracles: u8 (1 byte)
@@ -407,8 +412,8 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
 ///
 /// Total size: 11 bytes
 fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 6 {
-        msg!("Error: LiquidateUser requires at least 6 accounts");
+    if accounts.len() < 7 {
+        msg!("Error: LiquidateUser requires at least 7 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
@@ -418,6 +423,7 @@ fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], d
     let vault_account = &accounts[3];
     let router_authority = &accounts[4];
     let system_program = &accounts[5];
+    let slab_program = &accounts[6];
 
     // Validate accounts
     validate_owner(portfolio_account, program_id)?;
@@ -448,16 +454,16 @@ fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], d
     let current_ts = reader.read_u64()?;
 
     // Verify we have enough accounts
-    let required_accounts = 6 + num_oracles + num_slabs * 2;
+    let required_accounts = 7 + num_oracles + num_slabs * 2;
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for LiquidateUser");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     // Split accounts
-    let oracle_accounts = &accounts[6..6 + num_oracles];
-    let slab_accounts = &accounts[6 + num_oracles..6 + num_oracles + num_slabs];
-    let receipt_accounts = &accounts[6 + num_oracles + num_slabs..6 + num_oracles + num_slabs * 2];
+    let oracle_accounts = &accounts[7..7 + num_oracles];
+    let slab_accounts = &accounts[7 + num_oracles..7 + num_oracles + num_slabs];
+    let receipt_accounts = &accounts[7 + num_oracles + num_slabs..7 + num_oracles + num_slabs * 2];
 
     // Call the instruction handler
     process_liquidate_user(
@@ -469,6 +475,7 @@ fn process_liquidate_user_inner(program_id: &Pubkey, accounts: &[AccountInfo], d
         vault,
         router_authority,
         system_program,
+        slab_program,
         oracle_accounts,
         slab_accounts,
         receipt_accounts,
