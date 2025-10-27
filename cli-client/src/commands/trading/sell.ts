@@ -16,6 +16,7 @@ interface SellOptions {
   quantity: string;
   price?: string;  // Optional: if not provided, market order
   leverage?: string;  // Optional: "5x", "10x", etc. Default: 1x (spot)
+  oracle?: string;  // Optional: oracle pubkey (required for localnet, auto-fetched from registry on mainnet/devnet)
   keypair?: string;
   url?: string;
   network?: string;
@@ -227,15 +228,20 @@ export async function sellCommand(options: SellOptions): Promise<void> {
       spinner.text = 'Creating portfolio (first-time setup)...';
     }
 
-    // Build sell instruction - oracle is auto-fetched from SlabRegistry
-    spinner.text = 'Fetching oracle from registry...';
+    // Build sell instruction - oracle auto-fetched from SlabRegistry or provided via CLI
+    const oraclePublicKey = options.oracle ? new PublicKey(options.oracle) : undefined;
+    if (oraclePublicKey) {
+      spinner.text = 'Using provided oracle...';
+    } else {
+      spinner.text = 'Fetching oracle from registry...';
+    }
     const orderType = isMarketOrder ? ExecutionType.Market : ExecutionType.Limit;
     const sellIx = await client.buildSellInstruction(
       wallet.publicKey,
       slabMarket,
       validation.actualQuantity,  // Use leveraged quantity!
       price,
-      undefined,  // Oracle auto-fetched from SlabRegistry
+      oraclePublicKey,  // Oracle from CLI or auto-fetched from SlabRegistry
       orderType   // Market order if no price provided, Limit if price specified
     );
 
