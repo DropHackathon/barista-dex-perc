@@ -1086,7 +1086,7 @@ export class RouterClient {
 
     const keys = [
       { pubkey: userPortfolioAddress, isSigner: false, isWritable: true },
-      { pubkey: user, isSigner: true, isWritable: false },
+      { pubkey: user, isSigner: true, isWritable: true }, // Writable: pays for PositionDetails PDA rent
       { pubkey: dlpPortfolioAddress, isSigner: false, isWritable: true },
       { pubkey: registryPDA, isSigner: false, isWritable: true },
       { pubkey: authorityPDA, isSigner: false, isWritable: false },
