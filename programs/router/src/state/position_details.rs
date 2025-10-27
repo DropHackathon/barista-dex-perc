@@ -75,8 +75,17 @@ pub struct PositionDetails {
     /// Last update timestamp (Unix timestamp)
     pub last_update_ts: i64,
 
-    /// Reserved for future use (reach 128 bytes total)
-    pub _reserved: [u8; 24],
+    /// Total margin held in DLP for this position (in lamports)
+    ///
+    /// Tracks collateral transferred to DLP when opening/increasing position.
+    /// Must be returned to user when closing/reducing position.
+    pub margin_held: u128,
+
+    /// Leverage used for this position (1-10x)
+    pub leverage: u8,
+
+    /// Reserved for future use
+    pub _reserved: [u8; 7],
 }
 
 impl PositionDetails {
@@ -96,6 +105,8 @@ impl PositionDetails {
         initial_qty: i64,
         timestamp: i64,
         bump: u8,
+        initial_margin: u128,
+        leverage: u8,
     ) -> Self {
         Self {
             magic: u64::from_le_bytes(*POSITION_DETAILS_MAGIC),
@@ -111,7 +122,9 @@ impl PositionDetails {
             trade_count: 1,
             _padding2: [0; 4],
             last_update_ts: timestamp,
-            _reserved: [0; 24],
+            margin_held: initial_margin,
+            leverage,
+            _reserved: [0; 7],
         }
     }
 
@@ -130,6 +143,7 @@ impl PositionDetails {
         fill_qty: i64,
         fee: i128,
         timestamp: i64,
+        additional_margin: u128,
     ) {
         // Calculate weighted average entry price
         let old_cost = (self.avg_entry_price as i128) * (self.total_qty.abs() as i128);
@@ -143,6 +157,9 @@ impl PositionDetails {
         self.total_fees = self.total_fees.saturating_add(fee);
         self.trade_count += 1;
         self.last_update_ts = timestamp;
+
+        // Track additional margin held in DLP
+        self.margin_held = self.margin_held.saturating_add(additional_margin);
     }
 
     /// Update position when reducing existing position (opposite direction)
@@ -150,14 +167,14 @@ impl PositionDetails {
     /// Calculates realized PnL for the closed portion:
     /// pnl = qty_closed * (exit_price - avg_entry_price)
     ///
-    /// Returns: (realized_pnl, remaining_qty)
+    /// Returns: (realized_pnl, remaining_qty, margin_to_release)
     pub fn reduce_position(
         &mut self,
         exit_price: i64,
         reduce_qty: i64,
         fee: i128,
         timestamp: i64,
-    ) -> (i128, i64) {
+    ) -> (i128, i64, u128) {
         let qty_closed = reduce_qty.abs().min(self.total_qty.abs());
 
         // Calculate realized PnL: qty_closed * (exit_price - entry_price)
@@ -182,7 +199,26 @@ impl PositionDetails {
             self.total_qty += qty_closed;
         }
 
-        (pnl, self.total_qty)
+        // Calculate proportional margin to release
+        // If closing entire position, release all margin
+        // If partial close, release proportional amount
+        let total_qty_abs = (self.total_qty + if self.total_qty > 0 { qty_closed } else { -qty_closed }) as u128;
+        let margin_to_release = if self.total_qty == 0 {
+            // Full close - return all margin
+            let full_margin = self.margin_held;
+            self.margin_held = 0;
+            full_margin
+        } else if total_qty_abs > 0 {
+            // Partial close - return proportional margin
+            let proportion = (qty_closed as u128 * 1_000_000) / total_qty_abs;
+            let release = (self.margin_held * proportion) / 1_000_000;
+            self.margin_held = self.margin_held.saturating_sub(release);
+            release
+        } else {
+            0
+        };
+
+        (pnl, self.total_qty, margin_to_release)
     }
 
     /// Derive the PDA for a position
