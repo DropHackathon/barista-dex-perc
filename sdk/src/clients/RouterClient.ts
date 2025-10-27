@@ -447,10 +447,10 @@ export class RouterClient {
    * - Actual quantity: 5000 / 10 = 500 contracts
    */
   calculateActualQuantity(quantityInput: BN, price: BN, leverage: number = 1): BN {
-    // margin_committed = quantityInput * price / 1e6
-    // position_size = margin_committed * leverage
-    // actual_quantity = position_size / price * 1e6
-    // Simplified: actual_quantity = quantityInput * leverage
+    // quantityInput represents margin to commit
+    // Actual position = margin * leverage
+    // Example: 100 units margin at 5x = 500 units position = 500/price contracts
+    // Simplified: actualQuantity = quantityInput * leverage
     return quantityInput.mul(new BN(leverage));
   }
 
@@ -489,16 +489,21 @@ export class RouterClient {
 
     // If portfolio doesn't exist, it will be auto-created with 0 equity
     // Validation will fail (valid = false) but we return the calculation results
-    const availableEquity = portfolio ? new BN(portfolio.equity.toString()) : new BN(0);
+    // Convert equity from lamports to 1e6 scale (units) for consistency
+    // 1 SOL = 1e9 lamports = 1e6 units, so divide by 1000
+    const equityLamports = portfolio ? new BN(portfolio.equity.toString()) : new BN(0);
+    const availableEquity = equityLamports.div(new BN(1000));
 
-    // Calculate margin committed: quantity_input * price / 1e6
-    const marginCommitted = quantityInput.mul(price).div(new BN(1_000_000));
+    // quantityInput represents margin to commit (in units, NOT USD value)
+    // 1 unit = 1 contract = 1 underlying asset (e.g., 1 SOL)
+    // Margin committed = quantityInput (price is irrelevant)
+    const marginCommitted = quantityInput;
 
-    // Calculate actual position size: margin * leverage
-    const positionSize = this.calculatePositionSize(marginCommitted, leverage);
-
-    // Calculate actual quantity to trade: quantity_input * leverage
+    // Calculate actual position: margin * leverage
     const actualQuantity = this.calculateActualQuantity(quantityInput, price, leverage);
+
+    // Position size in value terms (for display): actualQuantity * price / 1e6
+    const positionSize = actualQuantity.mul(price).div(new BN(1_000_000));
 
     // Check if equity >= margin committed
     const valid = availableEquity.gte(marginCommitted);
@@ -1023,7 +1028,8 @@ export class RouterClient {
   async buildExecuteCrossSlabInstruction(
     user: PublicKey,
     splits: SlabSplit[],
-    orderType: ExecutionType = ExecutionType.Limit
+    orderType: ExecutionType = ExecutionType.Limit,
+    leverage: number = 1
   ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // v0.5: Single slab only (cross-slab routing disabled)
     if (splits.length !== 1) {
@@ -1044,9 +1050,17 @@ export class RouterClient {
     // Serialize instruction data:
     // - num_splits (u8)
     // - order_type (u8)
+    // - leverage (u8) - 1-10x leverage
     // - For each split: side (u8) + qty (i64) + limit_px (i64)
+
+    // Validate leverage
+    if (leverage < 1 || leverage > 10) {
+      throw new Error('Leverage must be between 1x and 10x');
+    }
+
     const numSplits = Buffer.from([splits.length]);
     const orderTypeBuffer = Buffer.from([orderType]);
+    const leverageBuffer = Buffer.from([leverage]);
     const splitBuffers = splits.map((split) => {
       const qtyBuffer = serializeI64(split.qty);
 
@@ -1061,6 +1075,7 @@ export class RouterClient {
       RouterInstruction.ExecuteCrossSlab,
       numSplits,
       orderTypeBuffer,
+      leverageBuffer,
       ...splitBuffers
     );
 
@@ -1738,7 +1753,8 @@ export class RouterClient {
     quantity: BN,
     limitPrice: BN,
     oracle?: PublicKey,
-    orderType: ExecutionType = ExecutionType.Limit
+    orderType: ExecutionType = ExecutionType.Limit,
+    leverage: number = 1
   ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // Auto-fetch oracle if not provided
     const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
@@ -1797,7 +1813,7 @@ export class RouterClient {
       dlpOwner, // Required for v0.5 PnL settlement
     };
 
-    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType);
+    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType, leverage);
   }
 
   /**
@@ -1817,7 +1833,8 @@ export class RouterClient {
     quantity: BN,
     limitPrice: BN,
     oracle?: PublicKey,
-    orderType: ExecutionType = ExecutionType.Limit
+    orderType: ExecutionType = ExecutionType.Limit,
+    leverage: number = 1
   ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // Auto-fetch oracle if not provided
     const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
@@ -1876,6 +1893,6 @@ export class RouterClient {
       dlpOwner, // Required for v0.5 PnL settlement
     };
 
-    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType);
+    return await this.buildExecuteCrossSlabInstruction(user, [split], orderType, leverage);
   }
 }
