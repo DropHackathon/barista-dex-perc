@@ -140,7 +140,7 @@ pub struct SlabSplit {
 pub fn process_execute_cross_slab(
     user_portfolio_account: &AccountInfo,
     user_portfolio: &mut Portfolio,
-    user: &Pubkey,
+    user_account: &AccountInfo,
     dlp_portfolio_account: &AccountInfo,
     dlp_portfolio: &mut Portfolio,
     registry: &mut SlabRegistry,
@@ -156,7 +156,7 @@ pub fn process_execute_cross_slab(
     program_id: &Pubkey,
 ) -> Result<(), PercolatorError> {
     // Verify user portfolio belongs to user
-    if &user_portfolio.user != user {
+    if &user_portfolio.user != user_account.key() {
         msg!("Error: Portfolio does not belong to user");
         return Err(PercolatorError::InvalidPortfolio);
     }
@@ -445,7 +445,7 @@ pub fn process_execute_cross_slab(
                     user_portfolio_account.key(),
                     slab_idx,
                     instrument_idx,
-                    user_portfolio_account, // Use portfolio account as payer (has SOL balance)
+                    user_account, // User account is the signer/payer
                     system_program,
                     program_id,
                     bump,
@@ -493,7 +493,7 @@ pub fn process_execute_cross_slab(
             // Check if position is fully closed
             if new_qty == 0 {
                 msg!("Position closed, closing PDA");
-                close_position_details_pda(position_details_account, user_portfolio_account)?;
+                close_position_details_pda(position_details_account, user_account)?;
             } else {
                 // Save updated PositionDetails
                 save_position_details(position_details_account, &position_details)?;

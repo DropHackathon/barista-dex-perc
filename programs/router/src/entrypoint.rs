@@ -374,7 +374,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
     process_execute_cross_slab(
         user_portfolio_account,
         user_portfolio,
-        user_account.key(),
+        user_account,
         dlp_portfolio_account,
         dlp_portfolio,
         registry,
