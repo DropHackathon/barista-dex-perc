@@ -233,15 +233,25 @@ Barista DEX supports 1-10x leverage on all trades. Leverage allows traders to co
 4. Example: 5 contracts at 5x = 1 SOL transferred to DLP
 
 **Position Close/Reduce:**
-1. Return margin: DLP portfolio → user portfolio
+1. **Leverage parameter is IGNORED** when closing positions
+   - You can close a 5x position using a 1x order (or any leverage)
+   - Matches real CEX behavior (Binance, dYdX, etc.)
+2. Return margin: DLP portfolio → user portfolio
    - Full close: return all `margin_held`
    - Partial close: return proportional margin
-2. Settle PnL separately:
+3. Settle PnL separately:
    - Profit: additional transfer DLP → User
    - Loss: additional transfer User → DLP
-3. Example: Close 5 contracts at 5x
+4. Example: Close 5 contracts (opened at 5x) with sell order at 1x
    - Margin returned: 1 SOL (DLP → User)
    - Plus/minus PnL based on price difference
+
+**Position Reversal** (over-closing):
+- If you sell MORE than your long position, it splits into close + reopen
+- Example: Long 5 @ 5x, sell 10 @ 10x:
+  1. Close long 5 (release 1 SOL margin)
+  2. Open short 5 @ 10x (add 0.5 SOL margin)
+  3. Net result: Short 5 contracts, IM = 0.5 SOL
 
 **Critical:** Margin is ALWAYS returned when closing positions. You get your collateral back regardless of PnL.
 

@@ -95,26 +95,26 @@ For more details on v0.5 → v1 migration, see [V1_ROADMAP.md](../thoughts/V1_RO
 
 #### View Portfolio
 
-**New in v0.1.30:** Clean, boxed layout with color-coded PnL and actual leverage display.
+**New in v0.1.32:** Clean, boxed layout with color-coded PnL, actual leverage display, and asset-agnostic "units" labels.
 
 ```bash
 barista portfolio
 
 # Example output:
-# ╭─💰 Balance─────────────────────────────────────╮
-# │  Equity: 49.000000000 SOL                     │
-# │  Free: 48.999 SOL  |  IM: 0.001 SOL  |  PnL: 0.00 SOL  │
-# ╰───────────────────────────────────────────────╯
+# ╭─💰 Balance────────────────────────────────────────╮
+# │  Equity: 49.000000000 units                       │
+# │  Free: 48.000 units  |  IM: 1.0 units  |  PnL: 0.00 units  │
+# ╰───────────────────────────────────────────────────╯
 #
-# ╭─📍 Positions──────────────────────────────────╮
-# │  1 active position                            │
-# ╰───────────────────────────────────────────────╯
+# ╭─📍 Positions──────────────────────────────────────╮
+# │  1 active position                                │
+# ╰───────────────────────────────────────────────────╯
 #
 # ┌──────────┬──────────┬──────────┬────────────┬────────────┬──────┐
 # │ Size     │ Entry    │ Mark     │ PnL        │ Notional   │ Lev  │
 # ├──────────┼──────────┼──────────┼────────────┼────────────┼──────┤
 # │ 5.000000 │ $199.00  │ $199.50  │ +0.002500  │ $997.50    │ 5x   │
-# └──────────┴──────────┴──────────┴────────────┴────────────┴──────┘
+# └──────────┴──────────┴──────────┴────────────┴──────────┴──────┘
 
 # View another trader's portfolio
 barista portfolio --address <trader-address>
@@ -172,6 +172,17 @@ barista buy --slab <SLAB_ADDRESS> -q 1000 -l 5x
 - Market orders: Filled at oracle price ± 0.5% slippage
 - Limit orders: Price validated within ±20% of oracle, then filled instantly
 - Settlement: Real SOL transfer between User Portfolio ↔ DLP Portfolio
+
+**Closing Positions:**
+- **Leverage is ignored when closing** - you can close a 5x position with a 1x order
+- Example: Opened long 5 contracts @ 5x, close with `sell -q 5` at any leverage
+- Margin is fully returned regardless of the leverage used on the close order
+
+**Position Reversals:**
+- Selling more than your long position automatically reverses to short
+- Example: Long 5 contracts, sell 10 contracts:
+  1. Closes the 5-contract long (returns margin)
+  2. Opens a 5-contract short (requires new margin based on sell order leverage)
 
 **v1 (Future):**
 - `--slab` will be optional (cross-slab smart routing re-enabled)
