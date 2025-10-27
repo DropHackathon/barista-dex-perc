@@ -140,9 +140,10 @@ export class RouterClient {
    * Receipts are temporary accounts that the slab writes fill data to
    * They're created per-transaction and can be discarded after
    * @param payer Payer for the account creation
+   * @param owner Program ID that will own the receipt (slab program)
    * @returns [instruction to create receipt, receipt keypair]
    */
-  async createReceiptAccount(payer: PublicKey): Promise<[TransactionInstruction, Keypair]> {
+  async createReceiptAccount(payer: PublicKey, owner: PublicKey): Promise<[TransactionInstruction, Keypair]> {
     // FillReceipt size: 48 bytes (u32 + u32 + i64*5)
     const RECEIPT_SIZE = 48;
     const lamports = await this.connection.getMinimumBalanceForRentExemption(RECEIPT_SIZE);
@@ -150,13 +151,13 @@ export class RouterClient {
     // Create ephemeral keypair for receipt
     const receiptKeypair = Keypair.generate();
 
-    // Create account owned by System Program (writable by slab program via CPI)
+    // Create account owned by slab program (so slab can write to it)
     const createIx = SystemProgram.createAccount({
       fromPubkey: payer,
       newAccountPubkey: receiptKeypair.publicKey,
       lamports,
       space: RECEIPT_SIZE,
-      programId: SystemProgram.programId,
+      programId: owner,  // Must be owned by slab program for it to write
     });
 
     return [createIx, receiptKeypair];
@@ -1049,13 +1050,20 @@ export class RouterClient {
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ];
 
+    // Get slab program ID (needed to create receipt with correct owner)
+    const slabAccountInfo = await this.connection.getAccountInfo(splits[0].slabMarket);
+    if (!slabAccountInfo) {
+      throw new Error(`Slab account not found: ${splits[0].slabMarket.toBase58()}`);
+    }
+    const slabProgramId = slabAccountInfo.owner;
+
     // Add slab accounts
     for (const split of splits) {
       keys.push({ pubkey: split.slabMarket, isSigner: false, isWritable: true });
     }
 
-    // Create ephemeral receipt account (one per slab)
-    const [receiptSetup, receiptKeypair] = await this.createReceiptAccount(user);
+    // Create ephemeral receipt account (owned by slab program so it can write to it)
+    const [receiptSetup, receiptKeypair] = await this.createReceiptAccount(user, slabProgramId);
 
     // Add receipt account (writable, will be written by slab)
     keys.push({ pubkey: receiptKeypair.publicKey, isSigner: false, isWritable: true });
