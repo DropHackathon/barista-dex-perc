@@ -457,6 +457,12 @@ pub fn process_execute_cross_slab(
                 let timestamp = Clock::get()
                     .map(|clock| clock.unix_timestamp)
                     .unwrap_or(0);
+
+                // Calculate margin for this new position
+                let quantity_abs = filled_qty.abs() as u128;
+                let leverage_u128 = leverage as u128;
+                let initial_margin = (quantity_abs * 1_000) / leverage_u128;
+
                 PositionDetails::new(
                     *user_portfolio_account.key(),
                     slab_idx,
@@ -465,6 +471,8 @@ pub fn process_execute_cross_slab(
                     filled_qty,   // initial quantity
                     timestamp,
                     bump,
+                    initial_margin, // margin held in DLP
+                    leverage,       // leverage (1-10x)
                 )
             }
         };
@@ -476,13 +484,8 @@ pub fn process_execute_cross_slab(
         let realized_pnl = if same_direction || current_exposure == 0 {
             // Adding to position or opening new position
             msg!("Adding to position");
-            use pinocchio::sysvars::{clock::Clock, Sysvar};
-            let timestamp = Clock::get()
-                .map(|clock| clock.unix_timestamp)
-                .unwrap_or(0);
-            position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp);
 
-            // Transfer collateral margin upfront from user to DLP
+            // Calculate margin for this trade
             // 1 contract = 1 SOL = 1e9 lamports
             // quantity is in 1e6 scale (e.g., 25,270,000 = 25.27 contracts)
             // Margin = (contracts × 1e9 lamports) / leverage
@@ -492,6 +495,13 @@ pub fn process_execute_cross_slab(
             // Calculate margin in lamports: (qty in 1e6 × 1000) / leverage
             // Example: 25.27 contracts at 5x = (25,270,000 × 1000) / 5 = 5,054,000,000 lamports = 5.054 SOL
             let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
+
+            // Update position details with new trade + margin
+            use pinocchio::sysvars::{clock::Clock, Sysvar};
+            let timestamp = Clock::get()
+                .map(|clock| clock.unix_timestamp)
+                .unwrap_or(0);
+            position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp, margin_lamports);
 
             // Transfer margin from user to DLP
             transfer_collateral_margin(
@@ -510,7 +520,19 @@ pub fn process_execute_cross_slab(
             let timestamp = Clock::get()
                 .map(|clock| clock.unix_timestamp)
                 .unwrap_or(0);
-            let (pnl, new_qty) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+            let (pnl, new_qty, margin_to_release) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+
+            // Return margin collateral from DLP to user
+            if margin_to_release > 0 {
+                msg!("Returning margin to user");
+                return_margin_to_user(
+                    user_portfolio_account,
+                    user_portfolio,
+                    dlp_portfolio_account,
+                    dlp_portfolio,
+                    margin_to_release,
+                )?;
+            }
 
             // Check if position is fully closed
             if new_qty == 0 {
@@ -782,6 +804,45 @@ fn transfer_collateral_margin(
     dlp_portfolio.principal = dlp_portfolio.principal.saturating_add(margin_i128);
 
     msg!("Collateral margin transferred to DLP");
+    Ok(())
+}
+
+/// Return margin collateral from DLP to user when closing/reducing position
+fn return_margin_to_user(
+    user_portfolio_account: &AccountInfo,
+    user_portfolio: &mut Portfolio,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
+    margin_lamports: u128,
+) -> Result<(), PercolatorError> {
+    if margin_lamports == 0 {
+        return Ok(());
+    }
+
+    let margin = margin_lamports as u64;
+
+    // Check DLP has sufficient lamports
+    if dlp_portfolio_account.lamports() < margin {
+        msg!("Error: DLP portfolio insufficient SOL to return margin");
+        return Err(PercolatorError::InsufficientFunds);
+    }
+
+    // Transfer SOL from DLP to User (reverse of transfer_collateral_margin)
+    *dlp_portfolio_account.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InsufficientFunds)? -= margin;
+    *user_portfolio_account.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InsufficientFunds)? += margin;
+
+    // Update equity tracking
+    let margin_i128 = margin as i128;
+    dlp_portfolio.equity = dlp_portfolio.equity.saturating_sub(margin_i128);
+    user_portfolio.equity = user_portfolio.equity.saturating_add(margin_i128);
+
+    // Update principal tracking (DLP returned, user received)
+    dlp_portfolio.principal = dlp_portfolio.principal.saturating_sub(margin_i128);
+    user_portfolio.principal = user_portfolio.principal.saturating_add(margin_i128);
+
+    msg!("Margin collateral returned to user");
     Ok(())
 }
 
