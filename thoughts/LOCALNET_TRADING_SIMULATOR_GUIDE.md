@@ -1083,3 +1083,183 @@ Happy trading! 🚀
 **Version**: v0.5 (Counterparty Settlement Model)
 **Programs**: Router, Slab, Oracle
 **CLIs**: cli-dlp (DLPs), cli-client (Traders)
+
+---
+
+## Update: 2025-10-27 - PnL Tracking Now Available
+
+### New Feature: Complete PnL Tracking
+
+The portfolio command now displays comprehensive PnL information for all positions!
+
+#### What's New
+
+**Entry Price Tracking**:
+- Every position now tracks its weighted average entry price
+- Multiple buys at different prices are averaged correctly
+- Entry price used for unrealized PnL calculation
+
+**Realized PnL**:
+- Sell orders now properly realize PnL
+- Shows cumulative realized gains/losses per position
+- Historical PnL preserved even after position closed
+
+**Unrealized PnL**:
+- Calculated from (current_mark_price - entry_price) × position_qty
+- Updates in real-time as mark price changes
+- Shows potential gain/loss if position closed now
+
+#### Portfolio Display Example
+
+```bash
+$ barista portfolio --network localnet
+
+📊 Portfolio Summary
+
+💰 Balance
+Equity:                 49.940000 SOL  # Reflects realized PnL
+Principal (Deposits):   50.000000 SOL
+Free Collateral:        49.737794 SOL
+
+📈 PnL & Vesting
+Total Realized PnL:     -0.060000 SOL  # Cumulative from all trades
+Vested PnL:             -0.060000 SOL
+
+📍 Trading Positions
+
+┌────────────────┬────────────┬──────────────┬─────────────┬────────────┬─────────────────┬─────────────────┐
+│ Slab           │ Instrument │ Position Qty │ Entry Price │ Mark Price │ Unrealized PnL  │ Realized PnL    │
+├────────────────┼────────────┼──────────────┼─────────────┼────────────┼─────────────────┼─────────────────┤
+│ 4dUTGx...      │ BTC-PERP   │ 10.000000    │ $201.950000 │ $201.890000│ -0.000600       │ -0.060000       │
+└────────────────┴────────────┴──────────────┴─────────────┴────────────┴─────────────────┴─────────────────┘
+```
+
+#### How It Works
+
+**Behind the Scenes**:
+- Each position gets a PositionDetails PDA (136 bytes)
+- Tracks: entry price, realized PnL, fees, trade count, timestamps
+- Created on first trade, closed when position reaches zero
+- Rent refunded to user on position close
+
+**PnL Calculations**:
+```
+Unrealized PnL = position_qty × (mark_price - entry_price)
+Realized PnL   = accumulated from all closing trades
+Total PnL      = Unrealized + Realized
+```
+
+**Weighted Average Entry Price**:
+```
+Entry Price = (old_qty × old_price + new_qty × new_price) / total_qty
+```
+
+#### Testing PnL Tracking
+
+**Scenario 1: Simple Buy and Sell**
+```bash
+# Buy 10 contracts at $201.95
+$ echo "y" | barista buy --slab <SLAB> --quantity 10 --oracle <ORACLE> --network localnet
+# Entry Price: $201.950000, Unrealized PnL: $0.00
+
+# Price moves to $202.00
+$ barista portfolio --network localnet
+# Entry Price: $201.950000, Unrealized PnL: $0.50 (10 × 0.05)
+
+# Sell 5 contracts at $202.00
+$ echo "y" | barista sell --slab <SLAB> --quantity 5 --oracle <ORACLE> --network localnet
+# Realized PnL: $0.25 (5 × 0.05)
+# Position now: 5 contracts, Entry: $201.950000, Realized: $0.25
+```
+
+**Scenario 2: Averaging**
+```bash
+# Buy 10 contracts at $200.00
+$ echo "y" | barista buy --slab <SLAB> --quantity 10 --oracle <ORACLE> --network localnet
+# Entry Price: $200.000000
+
+# Buy 10 more at $202.00
+$ echo "y" | barista buy --slab <SLAB> --quantity 10 --oracle <ORACLE> --network localnet  
+# Entry Price: $201.000000  # (10×200 + 10×202) / 20 = 201
+
+# Sell 15 contracts at $203.00
+$ echo "y" | barista sell --slab <SLAB> --quantity 15 --oracle <ORACLE> --network localnet
+# Realized PnL: $30.00  # 15 × (203 - 201)
+# Position now: 5 contracts, Entry: $201.000000, Realized: $30.00
+```
+
+**Scenario 3: Full Position Close**
+```bash
+# Close entire position
+$ echo "y" | barista sell --slab <SLAB> --quantity 20 --oracle <ORACLE> --network localnet
+# All PnL realized
+# PositionDetails PDA closed and rent refunded
+# Position removed from portfolio display
+```
+
+#### Verification
+
+**Check On-Chain Data**:
+```bash
+# Get position details PDA
+$ solana account <POSITION_DETAILS_PDA> --url localhost --output json
+
+# View portfolio equity
+$ barista portfolio --network localnet
+# Equity = Principal + Realized PnL
+```
+
+**Track PnL Over Time**:
+```bash
+# Before trade
+$ barista portfolio --network localnet | grep "Total Realized PnL"
+
+# Execute trade
+$ echo "y" | barista sell --slab <SLAB> --quantity 5 --oracle <ORACLE> --network localnet
+
+# After trade  
+$ barista portfolio --network localnet | grep "Total Realized PnL"
+# Should show change matching realized PnL from trade
+```
+
+#### Important Notes
+
+**Position Lifecycle**:
+1. First trade → PositionDetails PDA created (user pays ~0.001 SOL rent)
+2. Additional trades → PDA updated with new entry price or realized PnL
+3. Position close → All PnL realized, PDA closed, rent refunded
+
+**PnL Settlement**:
+- Realized PnL settled immediately in SOL
+- Equity updated to reflect gains/losses
+- SOL transferred directly between portfolio accounts
+
+**Display Accuracy**:
+- Entry prices shown to 6 decimal places
+- PnL values in SOL (9 decimal precision)
+- Mark prices from oracle (localnet) or slab state (mainnet/devnet)
+
+#### Troubleshooting
+
+**"Position shows entry price as $0.00"**:
+- PositionDetails PDA might not exist yet
+- Only created on first trade
+- Check if position was opened before PnL system deployed
+
+**"Unrealized PnL shows as —"**:
+- Missing mark price from oracle
+- Oracle might not be updating
+- Check oracle account has valid data
+
+**"Equity doesn't match expected"**:
+- Check Total Realized PnL
+- Equity = Principal + Realized PnL
+- Fees also deducted from equity
+
+---
+
+**For complete implementation details, see:**
+- `DEBUGGING_SESSION_SUMMARY.md` - Session 6
+- `PROJECT_DEVELOPMENT_HISTORY.md` - 2025-10-27 entry
+- `V1_ROADMAP.md` - PnL Tracking Complete section
+

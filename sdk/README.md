@@ -226,15 +226,24 @@ Barista DEX supports 1-10x leverage on all trades. Leverage allows traders to co
 
 #### Collateral Management
 
-When opening or increasing a position:
-1. **Upfront Transfer**: Collateral transfers from user portfolio → DLP portfolio
-2. **Margin Formula**: `margin = (quantity × 1e9) / leverage` lamports
-3. **Example**: 5 contracts at 5x = (5 × 1e9) / 5 = 1 SOL transferred
+**Position Open/Increase:**
+1. Calculate margin: `margin = (quantity × 1e9) / leverage` lamports
+2. Transfer margin from user portfolio → DLP portfolio
+3. Store in PositionDetails: `margin_held` and `leverage`
+4. Example: 5 contracts at 5x = 1 SOL transferred to DLP
 
-When closing a position:
-- PnL settles between user and DLP
-- **Profit**: DLP → User
-- **Loss**: User → DLP (collateral already held by DLP)
+**Position Close/Reduce:**
+1. Return margin: DLP portfolio → user portfolio
+   - Full close: return all `margin_held`
+   - Partial close: return proportional margin
+2. Settle PnL separately:
+   - Profit: additional transfer DLP → User
+   - Loss: additional transfer User → DLP
+3. Example: Close 5 contracts at 5x
+   - Margin returned: 1 SOL (DLP → User)
+   - Plus/minus PnL based on price difference
+
+**Critical:** Margin is ALWAYS returned when closing positions. You get your collateral back regardless of PnL.
 
 #### Initial Margin Requirements
 

@@ -166,8 +166,10 @@ async function createSlabCommand(options) {
         // Build slab initialization transaction
         // Note: The slab program will create the PDA account if it doesn't exist
         spinner.text = 'Building slab initialization transaction...';
+        // Derive router authority PDA (router_id should be the authority PDA, not the program ID)
+        const [routerAuthority] = web3_js_1.PublicKey.findProgramAddressSync([Buffer.from('authority')], routerProgramId);
         const initSlabIx = slabClient.buildInitializeSlabInstruction(wallet.publicKey, // lpOwner
-        routerProgramId, // routerId
+        routerAuthority, // routerId (router authority PDA)
         instrumentAddr, // instrument
         markPrice, // markPx
         takerFee, // takerFeeBps
