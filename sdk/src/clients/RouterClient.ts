@@ -1016,13 +1016,19 @@ export class RouterClient {
     // - For each split: side (u8) + qty (i64) + limit_px (i64)
     const numSplits = Buffer.from([splits.length]);
     const orderTypeBuffer = Buffer.from([orderType]);
-    const splitBuffers = splits.map((split) =>
-      Buffer.concat([
+    const splitBuffers = splits.map((split) => {
+      const qtyBuffer = serializeI64(split.qty);
+      console.log('DEBUG SDK: Serializing split');
+      console.log('  qty (BN):', split.qty.toString());
+      console.log('  qty buffer (hex):', qtyBuffer.toString('hex'));
+      console.log('  qty buffer (bytes):', Array.from(qtyBuffer));
+
+      return Buffer.concat([
         Buffer.from([split.side]),
-        serializeI64(split.qty),
+        qtyBuffer,
         serializeI64(split.limitPx),
-      ])
-    );
+      ]);
+    });
 
     const data = createInstructionData(
       RouterInstruction.ExecuteCrossSlab,
@@ -1031,6 +1037,8 @@ export class RouterClient {
       ...splitBuffers
     );
 
+    console.log('DEBUG SDK: Full instruction data (hex):', data.toString('hex'));
+
     // Build account list (v0.5 layout):
     // 0. user_portfolio (writable)
     // 1. user (signer)
@@ -1038,9 +1046,18 @@ export class RouterClient {
     // 3. registry (writable)
     // 4. router_authority (PDA)
     // 5. system_program (for SOL transfers)
-    // 6..6+n. slab_accounts (writable)
-    // 6+n..6+2n. receipt_accounts (writable)
-    // 6+2n..6+3n. oracle_accounts (readonly)
+    // 6. slab_program (for CPI to slab)
+    // 7..7+n. slab_accounts (writable)
+    // 7+n..7+2n. receipt_accounts (writable)
+    // 7+2n..7+3n. oracle_accounts (readonly)
+
+    // Get slab program ID (needed for CPI and receipt creation)
+    const slabAccountInfo = await this.connection.getAccountInfo(splits[0].slabMarket);
+    if (!slabAccountInfo) {
+      throw new Error(`Slab account not found: ${splits[0].slabMarket.toBase58()}`);
+    }
+    const slabProgramId = slabAccountInfo.owner;
+
     const keys = [
       { pubkey: userPortfolioAddress, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: false },
@@ -1048,14 +1065,8 @@ export class RouterClient {
       { pubkey: registryPDA, isSigner: false, isWritable: true },
       { pubkey: authorityPDA, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: slabProgramId, isSigner: false, isWritable: false },
     ];
-
-    // Get slab program ID (needed to create receipt with correct owner)
-    const slabAccountInfo = await this.connection.getAccountInfo(splits[0].slabMarket);
-    if (!slabAccountInfo) {
-      throw new Error(`Slab account not found: ${splits[0].slabMarket.toBase58()}`);
-    }
-    const slabProgramId = slabAccountInfo.owner;
 
     // Add slab accounts
     for (const split of splits) {
@@ -1312,12 +1323,21 @@ export class RouterClient {
       const instrumentIndex = data.readUInt16LE(offset);
       offset += 2;
 
+      // PADDING: 4 bytes (for i64 alignment in repr(C) tuple)
+      offset += 4;
+
       // position_qty: i64 (8 bytes)
+      const qtyBytes = data.slice(offset, offset + 8);
       const positionQty = deserializeI64(data, offset);
       offset += 8;
 
       // Only include non-zero positions
       if (!positionQty.isZero()) {
+        console.log(`DEBUG: Exposure ${i} - slabIndex=${slabIndex}, instrumentIndex=${instrumentIndex}`);
+        console.log(`  Raw bytes: [${Array.from(qtyBytes).join(', ')}]`);
+        console.log(`  Raw bytes (hex): ${qtyBytes.toString('hex')}`);
+        console.log(`  Deserialized qty: ${positionQty.toString()}`);
+
         exposures.push({
           slabIndex,
           instrumentIndex,
