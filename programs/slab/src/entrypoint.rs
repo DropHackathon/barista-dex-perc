@@ -5,6 +5,7 @@ use pinocchio::{
     entrypoint,
     msg,
     pubkey::Pubkey,
+    sysvars::{rent::Rent, Sysvar},
     ProgramResult,
 };
 
@@ -54,8 +55,9 @@ pub fn process_instruction(
 /// Process initialize instruction (v0)
 ///
 /// Expected accounts:
-/// 0. `[writable]` Slab state account (PDA, uninitialized)
-/// 1. `[signer]` Payer/authority
+/// 0. `[writable]` Slab state account (PDA, will be created if doesn't exist)
+/// 1. `[signer, writable]` Payer/authority
+/// 2. `[]` System program
 ///
 /// Expected data layout (121 bytes):
 /// - lp_owner: Pubkey (32 bytes)
@@ -65,15 +67,19 @@ pub fn process_instruction(
 /// - taker_fee_bps: i64 (8 bytes)
 /// - contract_size: i64 (8 bytes)
 /// - bump: u8 (1 byte)
+///
 fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 1 {
-        msg!("Error: Initialize instruction requires at least 1 account");
+    if accounts.len() < 3 {
+        msg!("Error: Initialize instruction requires 3 accounts (slab, payer, system_program)");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     let slab_account = &accounts[0];
-    validate_owner(slab_account, program_id)?;
+    let payer = &accounts[1];
+    let system_program = &accounts[2];
+
     validate_writable(slab_account)?;
+    validate_writable(payer)?;
 
     // Parse instruction data
     let mut reader = InstructionReader::new(data);
@@ -88,6 +94,95 @@ fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data:
     let lp_owner = Pubkey::from(lp_owner_bytes);
     let router_id = Pubkey::from(router_id_bytes);
     let instrument = Pubkey::from(instrument_bytes);
+
+    // Create account if it doesn't exist (lamports == 0)
+    if slab_account.lamports() == 0 {
+        msg!("Creating slab PDA account...");
+
+        use crate::state::SlabState;
+
+        // Calculate rent
+        let rent_lamports = Rent::get()?.minimum_balance(SlabState::LEN);
+
+        // Build seeds for PDA signing
+        let bump_seed = [bump];
+        let seeds = pinocchio::seeds!(b"slab", lp_owner.as_ref(), instrument.as_ref(), &bump_seed);
+
+        // Step 1: Transfer lamports to PDA (using Transfer instruction)
+        let mut transfer_instr = [2u32.to_le_bytes()[0], 2u32.to_le_bytes()[1], 2u32.to_le_bytes()[2], 2u32.to_le_bytes()[3], 0, 0, 0, 0, 0, 0, 0, 0];
+        transfer_instr[4..12].copy_from_slice(&rent_lamports.to_le_bytes());
+
+        let transfer_metas = [
+            pinocchio::instruction::AccountMeta {
+                pubkey: payer.key(),
+                is_signer: true,
+                is_writable: true,
+            },
+            pinocchio::instruction::AccountMeta {
+                pubkey: slab_account.key(),
+                is_signer: false,
+                is_writable: true,
+            },
+        ];
+
+        pinocchio::program::invoke(
+            &pinocchio::instruction::Instruction {
+                program_id: system_program.key(),
+                accounts: &transfer_metas,
+                data: &transfer_instr,
+            },
+            &[payer, slab_account, system_program],
+        )?;
+
+        // Step 2: Allocate space for PDA
+        let mut allocate_instr = [8u32.to_le_bytes()[0], 8u32.to_le_bytes()[1], 8u32.to_le_bytes()[2], 8u32.to_le_bytes()[3], 0, 0, 0, 0, 0, 0, 0, 0];
+        allocate_instr[4..12].copy_from_slice(&(SlabState::LEN as u64).to_le_bytes());
+
+        let allocate_metas = [
+            pinocchio::instruction::AccountMeta {
+                pubkey: slab_account.key(),
+                is_signer: true, // PDA signs via invoke_signed
+                is_writable: true,
+            },
+        ];
+
+        let signer_seeds_allocate = pinocchio::instruction::Signer::from(&seeds);
+        pinocchio::program::invoke_signed(
+            &pinocchio::instruction::Instruction {
+                program_id: system_program.key(),
+                accounts: &allocate_metas,
+                data: &allocate_instr,
+            },
+            &[slab_account, system_program],
+            &[signer_seeds_allocate],
+        )?;
+
+        // Step 3: Assign owner to this program
+        let mut assign_instr = [1u32.to_le_bytes()[0], 1u32.to_le_bytes()[1], 1u32.to_le_bytes()[2], 1u32.to_le_bytes()[3], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assign_instr[4..36].copy_from_slice(program_id.as_ref());
+
+        let assign_metas = [
+            pinocchio::instruction::AccountMeta {
+                pubkey: slab_account.key(),
+                is_signer: true, // PDA signs via invoke_signed
+                is_writable: true,
+            },
+        ];
+
+        let signer_seeds_assign = pinocchio::instruction::Signer::from(&seeds);
+        pinocchio::program::invoke_signed(
+            &pinocchio::instruction::Instruction {
+                program_id: system_program.key(),
+                accounts: &assign_metas,
+                data: &assign_instr,
+            },
+            &[slab_account, system_program],
+            &[signer_seeds_assign],
+        )?;
+    }
+
+    // Now validate ownership
+    validate_owner(slab_account, program_id)?;
 
     // Call the initialization logic
     process_initialize_slab(
