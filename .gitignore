@@ -65,6 +65,10 @@ desktop.ini
 !cli-client/package-lock.json
 !cli-client/tsconfig.json
 !cli-client/jest.config.js
+!cli-dlp/package.json
+!cli-dlp/package-lock.json
+!cli-dlp/tsconfig.json
+!cli-dlp/jest.config.js
 
 # Local configuration
 .env
