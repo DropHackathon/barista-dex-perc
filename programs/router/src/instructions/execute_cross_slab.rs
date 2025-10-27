@@ -1,6 +1,6 @@
 //! Execute cross-slab order - v0 main instruction
 
-use crate::state::{Portfolio, SlabRegistry};
+use crate::state::{Portfolio, SlabRegistry, PositionDetails, POSITION_DETAILS_SIZE};
 use crate::oracle::{OracleAdapter, CustomAdapter, PythAdapter};
 use percolator_common::*;
 use pinocchio::{account_info::AccountInfo, msg, pubkey::Pubkey};
