@@ -404,14 +404,16 @@ $ barista price --slab <address>
 
 **Buy Command** (`cli/src/commands/trading/buy.ts` - 104 lines):
 ```bash
-$ barista buy --slab <addr> -q 1000000 -p 50000000
+$ barista buy --slab <addr> -q 1 -p 50000
 # Execute atomic buy order
+# Note: Quantity uses human-readable decimals (6 decimal places)
 ```
 
 **Sell Command** (`cli/src/commands/trading/sell.ts` - 104 lines):
 ```bash
-$ barista sell --slab <addr> -q 500000 -p 51000000
+$ barista sell --slab <addr> -q 0.5 -p 51000
 # Execute atomic sell order
+# Note: Quantity uses human-readable decimals (6 decimal places)
 ```
 
 #### 4. SDK Enhancements

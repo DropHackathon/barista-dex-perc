@@ -1,11 +1,14 @@
 import { Connection, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { RouterClient } from '@barista-dex/sdk';
+import { RouterClient, parseAmount, formatAmount, ExecutionType } from '@barista-dex/sdk';
 import { loadKeypair, getDefaultKeypairPath } from '../../utils/wallet';
 import { displaySuccess, displayError, getExplorerUrl } from '../../utils/display';
 import { getNetworkConfig } from '../../config/networks';
 import chalk from 'chalk';
 import ora from 'ora';
 import BN from 'bn.js';
+
+// Decimal places for quantity and price (6 decimals like SOL/USDC)
+const DECIMALS = 6;
 
 interface BuyOptions {
   slab: string;        // Required in v0 (cross-slab routing disabled)
@@ -81,7 +84,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       wallet
     );
 
-    const quantityInput = new BN(options.quantity);
+    // Parse quantity as decimal (e.g., "1.5" -> 1500000 with 6 decimals)
+    const quantityInput = parseAmount(options.quantity, DECIMALS);
     let slabMarket: PublicKey;
     let price: BN;
 
@@ -121,7 +125,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
         price = await client.getMarketPrice(slabMarket, config.slabProgramId);
         console.log(chalk.gray(`  Market price: ${price.toString()}`));
       } else {
-        price = new BN(options.price!);
+        // Parse price as decimal (e.g., "50000.50" -> 50000500000 with 6 decimals)
+        price = parseAmount(options.price!, DECIMALS);
       }
     }
 
@@ -142,18 +147,18 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       console.log();
       console.log(chalk.gray('  Trade Details:'));
       console.log(chalk.gray(`    Mode: ${validation.mode === 'spot' ? 'Spot (1x)' : `Margin (${leverage}x)`}`));
-      console.log(chalk.gray(`    Quantity input: ${quantityInput.toString()} units`));
-      console.log(chalk.gray(`    Price: ${price.toString()}`));
-      console.log(chalk.gray(`    Margin committed: ${validation.marginCommitted.toString()} units`));
-      console.log(chalk.gray(`    Actual position size: ${validation.positionSize.toString()} units`));
-      console.log(chalk.gray(`    Actual quantity traded: ${validation.actualQuantity.toString()} contracts`));
-      console.log(chalk.red(`    Available equity: ${validation.availableEquity.toString()} units`));
+      console.log(chalk.gray(`    Quantity input: ${formatAmount(quantityInput, DECIMALS)} units`));
+      console.log(chalk.gray(`    Price: $${formatAmount(price, DECIMALS)}`));
+      console.log(chalk.gray(`    Margin committed: ${formatAmount(validation.marginCommitted, DECIMALS)} units`));
+      console.log(chalk.gray(`    Actual position size: ${formatAmount(validation.positionSize, DECIMALS)} units`));
+      console.log(chalk.gray(`    Actual quantity traded: ${formatAmount(validation.actualQuantity, DECIMALS)} contracts`));
+      console.log(chalk.red(`    Available equity: ${formatAmount(validation.availableEquity, DECIMALS)} units`));
       console.log();
 
       const maxQty = await client.calculateMaxQuantityInput(wallet.publicKey, price, leverage);
-      console.log(chalk.yellow(`  Tip: Maximum quantity input: ${maxQty.toString()} units`));
+      console.log(chalk.yellow(`  Tip: Maximum quantity input: ${formatAmount(maxQty, DECIMALS)} units`));
       if (leverage > 1) {
-        console.log(chalk.yellow(`       (This will open ${maxQty.mul(new BN(leverage)).toString()} contracts with ${leverage}x leverage)`));
+        console.log(chalk.yellow(`       (This will open ${formatAmount(maxQty.mul(new BN(leverage)), DECIMALS)} contracts with ${leverage}x leverage)`));
       }
       process.exit(1);
     }
@@ -164,14 +169,17 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     console.log(chalk.cyan('  Trade Summary:'));
     console.log(chalk.gray(`    Order type: ${isMarketOrder ? chalk.yellow('Market') : chalk.green('Limit')}`));
     console.log(chalk.gray(`    Mode: ${validation.mode === 'spot' ? chalk.green('Spot (1x)') : chalk.yellow(`Margin (${leverage}x)`)}`));
-    console.log(chalk.gray(`    Quantity input: ${quantityInput.toString()} units`));
-    console.log(chalk.gray(`    Price: ${price.toString()}`));
-    console.log(chalk.gray(`    Margin committed: ${validation.marginCommitted.toString()} units`));
-    console.log(chalk.cyan(`    → Actual position: ${validation.positionSize.toString()} units (${validation.actualQuantity.toString()} contracts)`));
-    console.log(chalk.gray(`    Available equity: ${validation.availableEquity.toString()} units`));
+    console.log(chalk.gray(`    Quantity input: ${formatAmount(quantityInput, DECIMALS)} units`));
+    console.log(chalk.gray(`    Price: $${formatAmount(price, DECIMALS)}`));
+    console.log(chalk.gray(`    Margin committed: ${formatAmount(validation.marginCommitted, DECIMALS)} units`));
+    console.log(chalk.cyan(`    → Actual position: ${formatAmount(validation.positionSize, DECIMALS)} units (${formatAmount(validation.actualQuantity, DECIMALS)} contracts)`));
+    console.log(chalk.gray(`    Available equity: ${formatAmount(validation.availableEquity, DECIMALS)} units`));
 
-    // Show v0 limit order warning
-    if (!isMarketOrder) {
+    // Show order type info
+    if (isMarketOrder) {
+      console.log();
+      console.log(chalk.gray(`  Market Order: Executes at oracle price (±0.5% slippage tolerance)`));
+    } else {
       console.log();
       console.log(chalk.yellow(`  ⚠️  v0 LIMIT ORDER: Executes INSTANTLY (not a resting order)`));
       console.log(chalk.gray(`     Price is sanity-checked within ±20% of oracle, then fills immediately`));
@@ -224,12 +232,14 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
 
     // Build buy instruction - oracle is auto-fetched from SlabRegistry
     spinner.text = 'Fetching oracle from registry...';
+    const orderType = isMarketOrder ? ExecutionType.Market : ExecutionType.Limit;
     const buyIx = await client.buildBuyInstruction(
       wallet.publicKey,
       slabMarket,
       validation.actualQuantity,  // Use leveraged quantity!
-      price
-      // Oracle parameter omitted - SDK auto-fetches from SlabRegistry
+      price,
+      undefined,  // Oracle auto-fetched from SlabRegistry
+      orderType   // Market order if no price provided, Limit if price specified
     );
 
     const transaction = new Transaction()

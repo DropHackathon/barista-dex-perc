@@ -423,18 +423,20 @@ barista portfolio --network localnet
 # Execute buy order on your slab (manual slab selection)
 barista buy \
   --slab <SLAB_ADDRESS> \
-  --quantity 1000000 \
-  --price 50000000000 \
+  --quantity 1 \
+  --price 50000 \
   --network localnet
 
 # Or use smart routing (finds best price automatically)
 barista buy \
   --instrument <INSTRUMENT_ID> \
-  --quantity 1000000 \
+  --quantity 1 \
   --network localnet
 ```
 
-**Note**: All amounts are in base units (lamports for SOL, 1e6 scale for prices/quantities).
+**Note**: Quantity and price use human-readable decimals (6 decimal places).
+- `--quantity 1` = 1.000000 contracts
+- `--price 50000` = $50,000.000000
 
 ---
 

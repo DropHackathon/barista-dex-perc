@@ -382,13 +382,13 @@ Create multiple trader accounts to simulate a trading environment.
 
 ```bash
 # Install the trader CLI globally from npm
-npm install -g @barista-dex/cli-client
+npm install -g @barista-dex/cli
 
 # Verify installation
 barista --help
 
 # Or use npx (no installation required)
-npx @barista-dex/cli-client --help
+npx @barista-dex/cli --help
 ```
 
 ### 5.2: Create Trader Wallets
@@ -466,12 +466,17 @@ barista price \
 ### 6.1: Trader 1 - Buy BTC-PERP
 
 ```bash
+# Buy 1 BTC contract at $50,000
 barista buy \
   --slab <SLAB_ADDRESS> \
-  --quantity 1000000 \
-  --limit-price 50000000000 \
+  --quantity 1 \
+  --price 50000 \
   --keypair ~/.config/solana/trader1.json \
   --network localnet
+
+# Note: Quantity and price use human-readable decimals (6 decimal places)
+# --quantity 1 = 1.000000 contracts
+# --price 50000 = $50,000.000000
 
 # Expected output:
 # ✓ Order executed!
@@ -484,10 +489,11 @@ barista buy \
 ### 6.2: Trader 2 - Sell BTC-PERP
 
 ```bash
+# Sell 0.5 BTC contracts at $50,000
 barista sell \
   --slab <SLAB_ADDRESS> \
-  --quantity 500000 \
-  --limit-price 50000000000 \
+  --quantity 0.5 \
+  --price 50000 \
   --keypair ~/.config/solana/trader2.json \
   --network localnet
 
@@ -505,10 +511,11 @@ Assume BTC price moves to $51,000 (update oracle or use market order):
 
 ```bash
 # Trader 1 - Close long position (profit)
+# Sell the 1.0 BTC bought earlier at new price $51,000
 barista sell \
   --slab <SLAB_ADDRESS> \
-  --quantity 1000000 \
-  --limit-price 51000000000 \
+  --quantity 1 \
+  --price 51000 \
   --keypair ~/.config/solana/trader1.json \
   --network localnet
 
@@ -521,10 +528,11 @@ barista sell \
 #   SOL transferred from DLP → Trader
 
 # Trader 2 - Close short position (loss)
+# Buy back the 0.5 BTC sold earlier at new price $51,000
 barista buy \
   --slab <SLAB_ADDRESS> \
-  --quantity 500000 \
-  --limit-price 51000000000 \
+  --quantity 0.5 \
+  --price 51000 \
   --keypair ~/.config/solana/trader2.json \
   --network localnet
 
@@ -597,11 +605,15 @@ barista portfolio --keypair ~/.config/solana/trader2.json --network localnet
 ```bash
 # Setup: BTC @ $50,000
 # Trader 1 buys 1.0 BTC-PERP
-barista buy --slab <SLAB> -q 1000000 -p 50000000000 --keypair trader1.json --network localnet
+barista buy --slab <SLAB> -q 1 -p 50000 --keypair trader1.json --network localnet
 
 # BTC rises to $52,000
 # Trader 1 sells 1.0 BTC-PERP (close position)
-barista sell --slab <SLAB> -q 1000000 -p 52000000000 --keypair trader1.json --network localnet
+barista sell --slab <SLAB> -q 1 -p 52000 --keypair trader1.json --network localnet
+
+# Note: Quantity and price use human-readable decimals (6 decimal places)
+# -q 1 = 1.000000 contracts
+# -p 50000 = $50,000.000000
 
 # Result:
 # - Trader 1 profit: ~0.04 SOL
@@ -614,11 +626,15 @@ barista sell --slab <SLAB> -q 1000000 -p 52000000000 --keypair trader1.json --ne
 ```bash
 # Setup: BTC @ $50,000
 # Trader 2 sells 0.5 BTC-PERP (short)
-barista sell --slab <SLAB> -q 500000 -p 50000000000 --keypair trader2.json --network localnet
+barista sell --slab <SLAB> -q 0.5 -p 50000 --keypair trader2.json --network localnet
 
 # BTC drops to $48,000
 # Trader 2 buys 0.5 BTC-PERP (close position)
-barista buy --slab <SLAB> -q 500000 -p 48000000000 --keypair trader2.json --network localnet
+barista buy --slab <SLAB> -q 0.5 -p 48000 --keypair trader2.json --network localnet
+
+# Note: Quantity and price use human-readable decimals (6 decimal places)
+# -q 0.5 = 0.500000 contracts
+# -p 50000 = $50,000.000000
 
 # Result:
 # - Trader 2 profit: ~0.02 SOL
@@ -630,18 +646,22 @@ barista buy --slab <SLAB> -q 500000 -p 48000000000 --keypair trader2.json --netw
 
 ```bash
 # Trader 1: Buy 1.0 BTC @ $50k
-barista buy --slab <SLAB> -q 1000000 -p 50000000000 --keypair trader1.json --network localnet
+barista buy --slab <SLAB> -q 1 -p 50000 --keypair trader1.json --network localnet
 
 # Trader 2: Sell 0.5 BTC @ $50k
-barista sell --slab <SLAB> -q 500000 -p 50000000000 --keypair trader2.json --network localnet
+barista sell --slab <SLAB> -q 0.5 -p 50000 --keypair trader2.json --network localnet
 
 # Price moves to $51k
 
 # Trader 1 closes (profit)
-barista sell --slab <SLAB> -q 1000000 -p 51000000000 --keypair trader1.json --network localnet
+barista sell --slab <SLAB> -q 1 -p 51000 --keypair trader1.json --network localnet
 
 # Trader 2 closes (loss)
-barista buy --slab <SLAB> -q 500000 -p 51000000000 --keypair trader2.json --network localnet
+barista buy --slab <SLAB> -q 0.5 -p 51000 --keypair trader2.json --network localnet
+
+# Note: Quantity and price use human-readable decimals (6 decimal places)
+# -q 1 = 1.000000 contracts
+# -p 50000 = $50,000.000000
 
 # Results:
 # - Trader 1: +0.02 SOL (long profit)
@@ -724,23 +744,61 @@ Update oracle prices to simulate market movements using the keeper:
 barista price --oracle <ORACLE_ADDRESS> --network localnet
 ```
 
-### Automated Price Updates (Oracle Crank)
+### Automated Price Updates (Oracle Crank with CoinGecko Feed)
 
-For automated price updates from real market data:
+For automated price updates from real market data (CoinGecko API):
 
 ```bash
-# Start oracle crank (fetches from CoinGecko/Binance/Coinbase)
+# Start oracle crank (fetches from CoinGecko by default)
 ./target/release/percolator-keeper oracle crank \
   --oracle <ORACLE_ADDRESS> \
-  --instrument BTC/USD \
+  --instrument BTC \
   --keypair ~/.config/solana/dlp-wallet.json \
   --rpc-url http://localhost:8899 \
-  --interval 5 \
-  --source coingecko
+  --interval 30
 
-# Runs continuously, updating price every 5 seconds
-# Press Ctrl+C to stop
+# Example for different assets:
+# BTC:  --instrument BTC
+# ETH:  --instrument ETH
+# SOL:  --instrument SOL
+# USDC: --instrument USDC
+# USDT: --instrument USDT
+
+# Or use full instrument names:
+# BTC/USD, BTC-PERP, ETH/USD, SOL-PERP, etc.
+# The crank extracts the base symbol (BTC, ETH, SOL) and maps to CoinGecko ID
+
+# The crank will:
+# - Fetch current price from CoinGecko API every 30 seconds
+# - Update the on-chain oracle if price changed significantly
+# - Display price updates in terminal
+# - Run continuously until you press Ctrl+C
+
+# You can also specify the price source explicitly:
+./target/release/percolator-keeper oracle crank \
+  --oracle <ORACLE_ADDRESS> \
+  --instrument SOL \
+  --source coingecko \
+  --interval 30 \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899
+
+# Other supported sources:
+# --source binance   (for Binance spot prices)
+# --source coinbase  (for Coinbase prices)
+
+# Press Ctrl+C to stop the crank
 ```
+
+**Supported Instrument Symbols** (auto-mapped to CoinGecko):
+- `BTC` → bitcoin
+- `ETH` → ethereum
+- `SOL` → solana
+- `USDC` → usd-coin
+- `USDT` → tether
+- Any other symbol → used as-is (must match CoinGecko ID)
+
+**Find CoinGecko IDs**: https://www.coingecko.com/
 
 ---
 
