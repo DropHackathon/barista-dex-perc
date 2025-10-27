@@ -23,9 +23,31 @@ interface PriceOracle {
 
 /**
  * Parse oracle account data
+ * Layout (programs/oracle/src/state.rs):
+ * - magic: u64 (8 bytes)
+ * - version: u8 (1 byte)
+ * - bump: u8 (1 byte)
+ * - _padding: [u8; 6] (6 bytes)
+ * - authority: Pubkey (32 bytes)
+ * - instrument: Pubkey (32 bytes)
+ * - price: i64 (8 bytes)
+ * - timestamp: i64 (8 bytes)
+ * - confidence: i64 (8 bytes)
  */
 function parseOracleData(data: Buffer): PriceOracle {
-  let offset = 8 + 1 + 1 + 6; // Skip magic, version, bump, padding
+  let offset = 0;
+
+  // Skip magic (8 bytes)
+  offset += 8;
+
+  // Skip version (1 byte)
+  offset += 1;
+
+  // Skip bump (1 byte)
+  offset += 1;
+
+  // Skip padding (6 bytes)
+  offset += 6;
 
   const authority = new PublicKey(data.slice(offset, offset + 32));
   offset += 32;

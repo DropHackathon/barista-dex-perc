@@ -199,25 +199,49 @@ echo "Oracle: $BARISTA_ORACLE_PROGRAM"
 
 ## Step 3: Initialize Router Registry
 
-The router needs a registry account to track slabs:
+The router needs a registry account for PnL vesting and liquidation parameters. This is a **one-time protocol setup step** performed during deployment.
 
-```bash
-cd cli
+See [REGISTRY_INITIALIZATION.md](./REGISTRY_INITIALIZATION.md) for detailed instructions.
 
-# Ensure Solana CLI is configured to use localnet and your keypair
-solana config set --url localhost
-solana config set --keypair ~/.config/solana/id.json
+**Quick setup for localnet:**
 
-# Initialize registry
-cargo run -- init --name "Barista DEX"
+Create a TypeScript script `scripts/init-registry-localnet.ts`:
 
-# Expected output:
-# ✓ Registry initialized at: <REGISTRY_ADDRESS>
+```typescript
+import { Connection, Keypair, sendAndConfirmTransaction, Transaction } from '@solana/web3.js';
+import { RouterClient } from '@barista-dex/sdk';
+import fs from 'fs';
 
-# Save the registry address for later use
+const connection = new Connection('http://localhost:8899', 'confirmed');
+const deployerKeypair = Keypair.fromSecretKey(
+  new Uint8Array(JSON.parse(fs.readFileSync(process.env.HOME + '/.config/solana/id.json', 'utf-8')))
+);
+const ROUTER_PROGRAM_ID = new PublicKey('Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx');
+
+async function main() {
+  const client = new RouterClient(connection, ROUTER_PROGRAM_ID, deployerKeypair);
+
+  if (await client.isRegistryInitialized()) {
+    console.log('✓ Registry already initialized');
+    return;
+  }
+
+  const instructions = await client.buildInitializeRegistryInstructions(deployerKeypair.publicKey);
+  const tx = new Transaction().add(...instructions);
+  const sig = await sendAndConfirmTransaction(connection, tx, [deployerKeypair]);
+
+  console.log('✓ Registry initialized!');
+  console.log(`  PDA: ${client.deriveRegistryAddress().toBase58()}`);
+  console.log(`  Sig: ${sig}`);
+}
+
+main().catch(console.error);
 ```
 
-**Note**: The `percolator init` command uses your Solana CLI configuration for keypair and network. Make sure `solana config get` shows the correct settings.
+Run it:
+```bash
+ts-node scripts/init-registry-localnet.ts
+```
 
 ---
 
@@ -463,10 +487,52 @@ barista price \
 # Note: Custom oracle for localnet testing only.
 ```
 
-### 6.1: Trader 1 - Buy BTC-PERP
+### 6.1: Understanding Order Types
+
+Barista DEX supports two order execution types:
+
+**Market Orders (recommended for v0):**
+- Omit the `--price` parameter
+- Executes at current oracle price
+- Tighter slippage protection (±0.5%)
+- Best for immediate fills at fair price
+
+**Limit Orders:**
+- Specify `--price <value>`
+- Executes at your specified price
+- Wider sanity check (±20% of oracle)
+- ⚠️ **v0 limitation**: Fills immediately (atomic), not a resting order
+- True resting limit orders coming in v1+
+
+**For most testing, use market orders** - they're simpler and match production behavior better.
+
+### 6.2: Trader 1 - Buy BTC-PERP (Market Order)
 
 ```bash
-# Buy 1 BTC contract at $50,000
+# Buy 1 BTC contract at market price
+barista buy \
+  --slab <SLAB_ADDRESS> \
+  --quantity 1 \
+  --keypair ~/.config/solana/trader1.json \
+  --network localnet
+
+# Note: No --price parameter = market order
+# Quantity uses human-readable decimals (6 decimal places)
+# --quantity 1 = 1.000000 contracts
+
+# Expected output:
+# Market Order: Executes at oracle price (±0.5% slippage tolerance)
+# ✓ Order executed!
+#   Side: Buy
+#   Quantity: 1.0
+#   Fill Price: $50,000.00 (oracle price)
+#   PnL: 0.0 SOL (opening position)
+```
+
+**Optional: Using Limit Orders**
+
+```bash
+# Buy 1 BTC contract with limit price $50,000
 barista buy \
   --slab <SLAB_ADDRESS> \
   --quantity 1 \
@@ -474,52 +540,55 @@ barista buy \
   --keypair ~/.config/solana/trader1.json \
   --network localnet
 
-# Note: Quantity and price use human-readable decimals (6 decimal places)
-# --quantity 1 = 1.000000 contracts
-# --price 50000 = $50,000.000000
-
-# Expected output:
-# ✓ Order executed!
-#   Side: Buy
-#   Quantity: 1.0
-#   Fill Price: $50,000.00
-#   PnL: 0.0 SOL (opening position)
+# Note: --price specified = limit order (atomic fill in v0)
+# Price is sanity-checked within ±20% of oracle, then fills immediately
 ```
 
-### 6.2: Trader 2 - Sell BTC-PERP
+### 6.3: Trader 2 - Sell BTC-PERP (Market Order)
 
 ```bash
-# Sell 0.5 BTC contracts at $50,000
+# Sell 0.5 BTC contracts at market price (short position)
 barista sell \
   --slab <SLAB_ADDRESS> \
   --quantity 0.5 \
-  --price 50000 \
   --keypair ~/.config/solana/trader2.json \
   --network localnet
 
 # Expected output:
+# Market Order: Executes at oracle price (±0.5% slippage tolerance)
 # ✓ Order executed!
 #   Side: Sell
 #   Quantity: 0.5
-#   Fill Price: $50,000.00
+#   Fill Price: $50,000.00 (oracle price)
 #   PnL: 0.0 SOL (opening position)
 ```
 
-### 6.3: Close Positions with PnL
+### 6.4: Close Positions with PnL
 
-Assume BTC price moves to $51,000 (update oracle or use market order):
+First, update the oracle to simulate price movement:
+
+```bash
+# Update oracle price to $51,000 (simulate BTC price increase)
+percolator-keeper oracle update \
+  --oracle <ORACLE_ADDRESS> \
+  --price 51000 \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899
+```
+
+Now traders can close their positions at the new market price:
 
 ```bash
 # Trader 1 - Close long position (profit)
-# Sell the 1.0 BTC bought earlier at new price $51,000
+# Sell the 1.0 BTC bought earlier at new market price
 barista sell \
   --slab <SLAB_ADDRESS> \
   --quantity 1 \
-  --price 51000 \
   --keypair ~/.config/solana/trader1.json \
   --network localnet
 
 # Expected output:
+# Market Order: Executes at oracle price (±0.5% slippage tolerance)
 # ✓ Order executed!
 #   Side: Sell
 #   Quantity: 1.0
@@ -528,15 +597,15 @@ barista sell \
 #   SOL transferred from DLP → Trader
 
 # Trader 2 - Close short position (loss)
-# Buy back the 0.5 BTC sold earlier at new price $51,000
+# Buy back the 0.5 BTC sold earlier at new market price
 barista buy \
   --slab <SLAB_ADDRESS> \
   --quantity 0.5 \
-  --price 51000 \
   --keypair ~/.config/solana/trader2.json \
   --network localnet
 
 # Expected output:
+# Market Order: Executes at oracle price (±0.5% slippage tolerance)
 # ✓ Order executed!
 #   Side: Buy
 #   Quantity: 0.5
@@ -603,17 +672,20 @@ barista portfolio --keypair ~/.config/solana/trader2.json --network localnet
 ### Scenario 1: Long Position Profit
 
 ```bash
-# Setup: BTC @ $50,000
-# Trader 1 buys 1.0 BTC-PERP
-barista buy --slab <SLAB> -q 1 -p 50000 --keypair trader1.json --network localnet
+# Setup: BTC @ $50,000 (oracle price)
+# Trader 1 buys 1.0 BTC-PERP at market
+barista buy --slab <SLAB> -q 1 --keypair trader1.json --network localnet
+# Fills at $50,000 (oracle price with ±0.5% slippage tolerance)
 
-# BTC rises to $52,000
-# Trader 1 sells 1.0 BTC-PERP (close position)
-barista sell --slab <SLAB> -q 1 -p 52000 --keypair trader1.json --network localnet
+# BTC rises to $52,000 - update oracle
+percolator-keeper oracle update --oracle <ORACLE> --price 52000 --keypair dlp.json --rpc-url http://localhost:8899
 
-# Note: Quantity and price use human-readable decimals (6 decimal places)
-# -q 1 = 1.000000 contracts
-# -p 50000 = $50,000.000000
+# Trader 1 sells 1.0 BTC-PERP at new market price (close position)
+barista sell --slab <SLAB> -q 1 --keypair trader1.json --network localnet
+# Fills at $52,000 (new oracle price)
+
+# Note: Market orders (no --price) execute at oracle price with tight slippage protection
+# Quantity uses human-readable decimals: -q 1 = 1.000000 contracts
 
 # Result:
 # - Trader 1 profit: ~0.04 SOL
@@ -624,17 +696,20 @@ barista sell --slab <SLAB> -q 1 -p 52000 --keypair trader1.json --network localn
 ### Scenario 2: Short Position Profit
 
 ```bash
-# Setup: BTC @ $50,000
-# Trader 2 sells 0.5 BTC-PERP (short)
-barista sell --slab <SLAB> -q 0.5 -p 50000 --keypair trader2.json --network localnet
+# Setup: BTC @ $50,000 (oracle price)
+# Trader 2 sells 0.5 BTC-PERP (short position)
+barista sell --slab <SLAB> -q 0.5 --keypair trader2.json --network localnet
+# Fills at $50,000 (oracle price with ±0.5% slippage tolerance)
 
-# BTC drops to $48,000
-# Trader 2 buys 0.5 BTC-PERP (close position)
-barista buy --slab <SLAB> -q 0.5 -p 48000 --keypair trader2.json --network localnet
+# BTC drops to $48,000 - update oracle
+percolator-keeper oracle update --oracle <ORACLE> --price 48000 --keypair dlp.json --rpc-url http://localhost:8899
 
-# Note: Quantity and price use human-readable decimals (6 decimal places)
-# -q 0.5 = 0.500000 contracts
-# -p 50000 = $50,000.000000
+# Trader 2 buys 0.5 BTC-PERP at new market price (close position)
+barista buy --slab <SLAB> -q 0.5 --keypair trader2.json --network localnet
+# Fills at $48,000 (new oracle price)
+
+# Note: Market orders execute at oracle price with ±0.5% slippage tolerance
+# Quantity uses human-readable decimals: -q 0.5 = 0.500000 contracts
 
 # Result:
 # - Trader 2 profit: ~0.02 SOL
@@ -645,23 +720,25 @@ barista buy --slab <SLAB> -q 0.5 -p 48000 --keypair trader2.json --network local
 ### Scenario 3: Multiple Traders, Mixed Outcomes
 
 ```bash
-# Trader 1: Buy 1.0 BTC @ $50k
-barista buy --slab <SLAB> -q 1 -p 50000 --keypair trader1.json --network localnet
+# Setup: BTC @ $50k
+# Trader 1: Buy 1.0 BTC at market
+barista buy --slab <SLAB> -q 1 --keypair trader1.json --network localnet
 
-# Trader 2: Sell 0.5 BTC @ $50k
-barista sell --slab <SLAB> -q 0.5 -p 50000 --keypair trader2.json --network localnet
+# Trader 2: Sell 0.5 BTC at market (short)
+barista sell --slab <SLAB> -q 0.5 --keypair trader2.json --network localnet
 
-# Price moves to $51k
+# Price moves to $51k - update oracle
+percolator-keeper oracle update --oracle <ORACLE> --price 51000 --keypair dlp.json --rpc-url http://localhost:8899
 
-# Trader 1 closes (profit)
-barista sell --slab <SLAB> -q 1 -p 51000 --keypair trader1.json --network localnet
+# Trader 1 closes at market (profit)
+barista sell --slab <SLAB> -q 1 --keypair trader1.json --network localnet
 
-# Trader 2 closes (loss)
-barista buy --slab <SLAB> -q 0.5 -p 51000 --keypair trader2.json --network localnet
+# Trader 2 closes at market (loss)
+barista buy --slab <SLAB> -q 0.5 --keypair trader2.json --network localnet
 
-# Note: Quantity and price use human-readable decimals (6 decimal places)
-# -q 1 = 1.000000 contracts
-# -p 50000 = $50,000.000000
+# Note: All trades use market orders (no --price specified)
+# Market orders execute at oracle price with ±0.5% slippage tolerance
+# Quantity uses human-readable decimals: -q 1 = 1.000000 contracts
 
 # Results:
 # - Trader 1: +0.02 SOL (long profit)

@@ -56,7 +56,7 @@ export async function bookCommand(options: BookOptions): Promise<void> {
     spinner.succeed('Order book loaded');
 
     // Display order book
-    console.log(chalk.bold(`\n📖 Order Book (${options.slab.slice(0, 8)}...)\n`));
+    console.log(chalk.bold(`\n📖 Order Book (${options.slab})\n`));
 
     // Create table
     const table = new Table({

@@ -717,28 +717,69 @@ export class RouterClient {
   // ============================================================================
 
   /**
-   * Build Initialize instruction
-   * Creates the global Registry and Authority accounts
-   * @param payer Payer and authority for initialization
+   * Build Initialize instruction for SlabRegistry
+   * Initializes the global registry account with governance authority
+   * @param payer Public key paying for account creation
+   * @param governance Governance authority public key
    * @returns TransactionInstruction
    */
-  buildInitializeInstruction(payer: PublicKey): TransactionInstruction {
+  buildInitializeInstruction(payer: PublicKey, governance: PublicKey): TransactionInstruction {
     const [registryPDA] = this.deriveRegistryPDA();
-    const [authorityPDA] = this.deriveAuthorityPDA();
 
-    const data = createInstructionData(RouterInstruction.Initialize);
+    const data = createInstructionData(
+      RouterInstruction.Initialize,
+      serializePubkey(governance)
+    );
 
     return new TransactionInstruction({
       programId: this.programId,
       keys: [
         { pubkey: registryPDA, isSigner: false, isWritable: true },
-        { pubkey: authorityPDA, isSigner: false, isWritable: true },
         { pubkey: payer, isSigner: true, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-        { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
       ],
       data,
     });
+  }
+
+  /**
+   * Build instructions to initialize SlabRegistry
+   * The router program creates the registry PDA account via CPI during initialization
+   * @param payer Public key paying for account creation and rent
+   * @param governance Governance authority public key (defaults to payer)
+   * @returns Single instruction to initialize registry (program creates PDA internally)
+   */
+  async buildInitializeRegistryInstructions(
+    payer: PublicKey,
+    governance?: PublicKey
+  ): Promise<TransactionInstruction[]> {
+    const governanceKey = governance || payer;
+
+    // The Initialize instruction creates the registry PDA account via CPI
+    // No need for separate createAccount instruction
+    const initializeIx = this.buildInitializeInstruction(payer, governanceKey);
+
+    return [initializeIx];
+  }
+
+  /**
+   * Derive registry address (PDA)
+   * The registry account is a PDA with seed "registry"
+   * @returns Registry PDA address
+   */
+  deriveRegistryAddress(): PublicKey {
+    const [registryPDA] = this.deriveRegistryPDA();
+    return registryPDA;
+  }
+
+  /**
+   * Check if SlabRegistry is initialized
+   * @returns true if registry exists and is initialized
+   */
+  async isRegistryInitialized(): Promise<boolean> {
+    const registryAddress = this.deriveRegistryAddress();
+    const accountInfo = await this.connection.getAccountInfo(registryAddress);
+    return accountInfo !== null && accountInfo.owner.equals(this.programId);
   }
 
   /**

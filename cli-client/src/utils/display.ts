@@ -32,17 +32,17 @@ export function calculateSpread(bid: BN, ask: BN): string {
 }
 
 /**
- * Format Solana signature for display
+ * Format Solana signature for display (full signature)
  */
 export function formatSignature(signature: string): string {
-  return `${signature.slice(0, 8)}...${signature.slice(-8)}`;
+  return signature;
 }
 
 /**
- * Format public key for display
+ * Format public key for display (full address)
  */
 export function formatPublicKey(pubkey: string): string {
-  return `${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
+  return pubkey;
 }
 
 /**

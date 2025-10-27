@@ -236,6 +236,8 @@ export async function sellCommand(options: SellOptions): Promise<void> {
       spinner.text = 'Fetching oracle from registry...';
     }
     const orderType = isMarketOrder ? ExecutionType.Market : ExecutionType.Limit;
+
+    spinner.text = 'Building sell instruction...';
     const sellIx = await client.buildSellInstruction(
       wallet.publicKey,
       slabMarket,
@@ -245,9 +247,22 @@ export async function sellCommand(options: SellOptions): Promise<void> {
       orderType   // Market order if no price provided, Limit if price specified
     );
 
-    const transaction = new Transaction()
-      .add(...ensurePortfolioIxs)  // Auto-create portfolio if needed
-      .add(sellIx);
+    if (!sellIx) {
+      throw new Error('Failed to build sell instruction');
+    }
+
+    spinner.text = 'Creating transaction...';
+    const transaction = new Transaction();
+
+    // Add portfolio initialization instructions if needed
+    if (ensurePortfolioIxs.length > 0) {
+      for (const ix of ensurePortfolioIxs) {
+        transaction.add(ix);
+      }
+    }
+
+    // Add sell instruction
+    transaction.add(sellIx);
 
     // Send and confirm transaction
     spinner.text = 'Sending transaction...';

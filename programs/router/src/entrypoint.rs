@@ -84,19 +84,21 @@ pub fn process_instruction(
 /// Process initialize instruction
 ///
 /// Expected accounts:
-/// 0. `[writable]` Registry account (PDA, must be pre-created)
+/// 0. `[writable]` Registry account (PDA, will be created)
 /// 1. `[signer, writable]` Payer account
+/// 2. `[]` System program
 ///
 /// Expected data layout (32 bytes):
 /// - governance: Pubkey (32 bytes)
 fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
-    if accounts.len() < 2 {
-        msg!("Error: Initialize instruction requires at least 2 accounts");
+    if accounts.len() < 3 {
+        msg!("Error: Initialize instruction requires at least 3 accounts");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
     let registry_account = &accounts[0];
     let payer_account = &accounts[1];
+    let system_program = &accounts[2];
 
     // Validate accounts
     validate_writable(registry_account)?;
@@ -108,7 +110,7 @@ fn process_initialize_inner(program_id: &Pubkey, accounts: &[AccountInfo], data:
     let governance = Pubkey::from(governance_bytes);
 
     // Call the initialization logic
-    process_initialize_registry(program_id, registry_account, payer_account, &governance)?;
+    process_initialize_registry(program_id, registry_account, payer_account, system_program, &governance)?;
 
     msg!("Router initialized successfully");
     Ok(())

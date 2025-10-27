@@ -11,36 +11,36 @@ use pinocchio::{
 
 /// Process initialize instruction for registry
 ///
-/// Initializes the slab registry account with governance authority.
-/// The account must be created externally using create_account_with_seed before calling this instruction.
+/// Creates and initializes the slab registry PDA account with governance authority.
+/// The registry account is created via CPI using the derived PDA.
 ///
 /// # Security Checks
-/// - Verifies registry account is derived from payer with correct seed
+/// - Verifies registry PDA derivation is correct
 /// - Verifies governance pubkey is valid
 /// - Prevents double initialization
-/// - Validates account ownership and size
+/// - Requires payer to sign
 ///
 /// # Arguments
 /// * `program_id` - The router program ID
-/// * `registry_account` - The registry account (created with seed "registry")
-/// * `payer` - Account paying for rent (also base for seed derivation)
+/// * `registry_account` - The registry PDA account (will be created if doesn't exist)
+/// * `payer` - Account paying for rent
+/// * `system_program` - System program for account creation
 /// * `governance` - The governance authority pubkey
 pub fn process_initialize_registry(
     program_id: &Pubkey,
     registry_account: &AccountInfo,
     payer: &AccountInfo,
+    system_program: &AccountInfo,
     governance: &Pubkey,
 ) -> Result<(), PercolatorError> {
-    // Derive the authority PDA that will be stored in the registry
-    let (authority_pda, bump) = derive_registry_pda(program_id);
+    // Derive the registry PDA
+    let (registry_pda, bump) = derive_registry_pda(program_id);
 
-    // NOTE: We cannot verify create_with_seed derivation in pinocchio (no_std BPF environment)
-    // because Pubkey::create_with_seed is not available. The client is responsible for
-    // deriving the correct address. We rely on other security checks:
-    // - Ownership verification (must be owned by this program)
-    // - Size verification (must match SlabRegistry::LEN exactly)
-    // - Initialization check (prevents double-initialization)
-    // - Signer verification (payer must sign)
+    // SECURITY: Verify the provided registry account matches the derived PDA
+    if registry_account.key() != &registry_pda {
+        msg!("Error: Invalid registry PDA");
+        return Err(PercolatorError::InvalidAccount);
+    }
 
     // SECURITY: Verify payer is signer
     if !payer.is_signer() {
@@ -54,43 +54,75 @@ pub fn process_initialize_registry(
         return Err(PercolatorError::InvalidAccount);
     }
 
-    // SECURITY: Verify account ownership
-    if registry_account.owner() != program_id {
-        msg!("Error: Registry account has incorrect owner");
-        return Err(PercolatorError::InvalidAccount);
-    }
+    // Check if account already exists and is initialized
+    if registry_account.lamports() > 0 {
+        // Account exists, check if already initialized
+        let data = registry_account.try_borrow_data()
+            .map_err(|_| PercolatorError::InvalidAccount)?;
 
-    // SECURITY: Verify account size
-    let data = registry_account.try_borrow_data()
-        .map_err(|_| PercolatorError::InvalidAccount)?;
-
-    if data.len() != SlabRegistry::LEN {
-        msg!("Error: Registry account has incorrect size");
-        return Err(PercolatorError::InvalidAccount);
-    }
-
-    // SECURITY: Check if already initialized (router_id should be zero)
-    // We check the first 32 bytes which should be the router_id field
-    let mut is_initialized = false;
-    for i in 0..32 {
-        if data[i] != 0 {
-            is_initialized = true;
-            break;
+        if data.len() != SlabRegistry::LEN {
+            msg!("Error: Registry account has incorrect size");
+            return Err(PercolatorError::InvalidAccount);
         }
-    }
 
-    if is_initialized {
-        msg!("Error: Registry account is already initialized");
-        return Err(PercolatorError::AlreadyInitialized);
-    }
+        // Check if already initialized (router_id should be zero)
+        let mut is_initialized = false;
+        for i in 0..32 {
+            if data[i] != 0 {
+                is_initialized = true;
+                break;
+            }
+        }
 
-    drop(data);
+        if is_initialized {
+            msg!("Error: Registry account is already initialized");
+            return Err(PercolatorError::AlreadyInitialized);
+        }
+        drop(data);
+    } else {
+        // Account doesn't exist, create it via CPI
+        msg!("Creating registry PDA account");
+
+        // Calculate rent exemption
+        use pinocchio::sysvars::{rent::Rent, Sysvar};
+        let rent = Rent::get()?;
+        let lamports = rent.minimum_balance(SlabRegistry::LEN);
+
+        // Create PDA account via CPI
+        let create_account_ix = pinocchio::instruction::Instruction {
+            program_id: system_program.key(),
+            accounts: pinocchio::instruction::AccountMeta {
+                pubkey: payer.key(),
+                is_signer: true,
+                is_writable: true,
+            },
+            data: &[], // Will be populated by create_account syscall
+        };
+
+        // Create account with PDA
+        use pinocchio::program::invoke_signed;
+        use pinocchio::sysvars::Sysvar;
+
+        invoke_signed(
+            &pinocchio::system_instruction::create_account(
+                payer.key(),
+                registry_account.key(),
+                lamports,
+                SlabRegistry::LEN as u64,
+                program_id,
+            ),
+            &[payer.clone(), registry_account.clone(), system_program.clone()],
+            &[&[b"registry", &[bump]]],
+        )?;
+
+        msg!("Registry PDA account created");
+    }
 
     // Initialize the registry in-place (avoids stack overflow)
     // Store the authority PDA in the registry for future authority checks
     let registry = unsafe { borrow_account_data_mut::<SlabRegistry>(registry_account)? };
 
-    registry.initialize_in_place(authority_pda, *governance, bump);
+    registry.initialize_in_place(registry_pda, *governance, bump);
 
     msg!("Registry initialized successfully");
     Ok(())

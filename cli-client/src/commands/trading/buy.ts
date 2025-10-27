@@ -239,6 +239,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       spinner.text = 'Fetching oracle from registry...';
     }
     const orderType = isMarketOrder ? ExecutionType.Market : ExecutionType.Limit;
+
+    spinner.text = 'Building buy instruction...';
     const buyIx = await client.buildBuyInstruction(
       wallet.publicKey,
       slabMarket,
@@ -248,9 +250,22 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       orderType   // Market order if no price provided, Limit if price specified
     );
 
-    const transaction = new Transaction()
-      .add(...ensurePortfolioIxs)  // Auto-create portfolio if needed
-      .add(buyIx);
+    if (!buyIx) {
+      throw new Error('Failed to build buy instruction');
+    }
+
+    spinner.text = 'Creating transaction...';
+    const transaction = new Transaction();
+
+    // Add portfolio initialization instructions if needed
+    if (ensurePortfolioIxs.length > 0) {
+      for (const ix of ensurePortfolioIxs) {
+        transaction.add(ix);
+      }
+    }
+
+    // Add buy instruction
+    transaction.add(buyIx);
 
     // Send and confirm transaction
     spinner.text = 'Sending transaction...';

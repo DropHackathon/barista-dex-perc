@@ -420,23 +420,24 @@ barista deposit --amount 5000000000 --network localnet
 # Verify portfolio
 barista portfolio --network localnet
 
-# Execute buy order on your slab (manual slab selection)
+# Execute market buy order (recommended for testing)
+barista buy \
+  --slab <SLAB_ADDRESS> \
+  --quantity 1 \
+  --network localnet
+
+# Or with limit price (atomic fill in v0)
 barista buy \
   --slab <SLAB_ADDRESS> \
   --quantity 1 \
   --price 50000 \
   --network localnet
-
-# Or use smart routing (finds best price automatically)
-barista buy \
-  --instrument <INSTRUMENT_ID> \
-  --quantity 1 \
-  --network localnet
 ```
 
-**Note**: Quantity and price use human-readable decimals (6 decimal places).
-- `--quantity 1` = 1.000000 contracts
-- `--price 50000` = $50,000.000000
+**Note**: Order execution types:
+- **Market order** (no `--price`): Executes at oracle price with ±0.5% slippage tolerance
+- **Limit order** (`--price` specified): Executes at specified price with ±20% sanity check (atomic fill in v0)
+- Quantity uses human-readable decimals: `--quantity 1` = 1.000000 contracts
 
 ---
 

@@ -37,13 +37,12 @@ export function formatPrice(price: BN, quoteDecimals: number, baseDecimals: numb
 }
 
 /**
- * Truncate public key for display (e.g., "AbC...XyZ")
+ * Format public key for display (returns full address)
+ * Note: Previously truncated, now returns full pubkey for better UX
  */
-export function truncatePubkey(pubkey: string, length: number = 4): string {
-  if (pubkey.length <= length * 2 + 3) {
-    return pubkey;
-  }
-  return `${pubkey.slice(0, length)}...${pubkey.slice(-length)}`;
+export function truncatePubkey(pubkey: string, length?: number): string {
+  // Return full pubkey - 'length' parameter kept for backward compatibility
+  return pubkey;
 }
 
 /**

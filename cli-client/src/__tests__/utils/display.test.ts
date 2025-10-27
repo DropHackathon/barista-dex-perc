@@ -70,16 +70,16 @@ describe('Display Utilities', () => {
   });
 
   describe('formatSignature', () => {
-    it('should truncate signature to first and last 8 chars', () => {
+    it('should return full signature', () => {
       const sig = '5Z6sRxvLqH8eGpDkHqL5Z6sRxvLqH8eGpDkHqL5Z6sRxvLqH8eGpDkHqL';
-      expect(formatSignature(sig)).toBe('5Z6sRxvL...eGpDkHqL');
+      expect(formatSignature(sig)).toBe(sig);
     });
   });
 
   describe('formatPublicKey', () => {
-    it('should truncate pubkey to first and last 8 chars', () => {
+    it('should return full pubkey', () => {
       const pubkey = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-      expect(formatPublicKey(pubkey)).toBe('EPjFWdd5...ZwyTDt1v');
+      expect(formatPublicKey(pubkey)).toBe(pubkey);
     });
   });
 
