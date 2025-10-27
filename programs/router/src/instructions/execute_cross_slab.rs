@@ -150,8 +150,10 @@ pub fn process_execute_cross_slab(
     slab_accounts: &[AccountInfo],
     receipt_accounts: &[AccountInfo],
     oracle_accounts: &[AccountInfo],
+    position_details_accounts: &[AccountInfo],
     splits: &[SlabSplit],
     order_type: u8, // 0 = Market, 1 = Limit
+    program_id: &Pubkey,
 ) -> Result<(), PercolatorError> {
     // Verify user portfolio belongs to user
     if &user_portfolio.user != user {
@@ -184,11 +186,12 @@ pub fn process_execute_cross_slab(
         return Err(PercolatorError::InvalidInstruction);
     }
 
-    // Verify we have matching number of slabs, receipts, and oracles
+    // Verify we have matching number of slabs, receipts, oracles, and position details
     if slab_accounts.len() != receipt_accounts.len()
         || slab_accounts.len() != oracle_accounts.len()
+        || slab_accounts.len() != position_details_accounts.len()
         || slab_accounts.len() != splits.len() {
-        msg!("Error: Mismatched slab/receipt/oracle/split counts");
+        msg!("Error: Mismatched slab/receipt/oracle/position_details/split counts");
         return Err(PercolatorError::InvalidInstruction);
     }
 
@@ -405,14 +408,106 @@ pub fn process_execute_cross_slab(
         // Get current exposure
         let current_exposure = user_portfolio.get_exposure(slab_idx, instrument_idx);
 
-        // Calculate realized PnL if reducing position
-        let realized_pnl = calculate_realized_pnl(
-            current_exposure,
-            filled_qty,
-            split.side,
-            vwap_px,
-            split.limit_px, // Use limit price as approximate entry price
-        );
+        // Get PositionDetails account for this position
+        let position_details_account = &position_details_accounts[i];
+
+        // Load or create PositionDetails
+        let mut position_details = match load_position_details(position_details_account)? {
+            Some(details) => {
+                msg!("PositionDetails loaded");
+                details
+            }
+            None => {
+                // First trade for this position - create new PositionDetails PDA
+                msg!("Creating new PositionDetails PDA");
+
+                // Derive PDA with bump
+                use pinocchio::pubkey::find_program_address;
+                let slab_idx_bytes = slab_idx.to_le_bytes();
+                let instrument_idx_bytes = instrument_idx.to_le_bytes();
+                let seeds: &[&[u8]] = &[
+                    b"position",
+                    user_portfolio_account.key().as_ref(),
+                    &slab_idx_bytes,
+                    &instrument_idx_bytes,
+                ];
+                let (expected_pda, bump) = find_program_address(seeds, program_id);
+
+                // Verify provided account matches derived PDA
+                if position_details_account.key() != &expected_pda {
+                    msg!("Error: PositionDetails PDA mismatch");
+                    return Err(PercolatorError::InvalidAccount);
+                }
+
+                // Create the PDA
+                create_position_details_pda(
+                    position_details_account,
+                    user_portfolio_account.key(),
+                    slab_idx,
+                    instrument_idx,
+                    user_portfolio_account, // Use portfolio account as payer (has SOL balance)
+                    system_program,
+                    program_id,
+                    bump,
+                )?;
+
+                // Initialize new PositionDetails with first trade
+                use pinocchio::sysvars::{clock::Clock, Sysvar};
+                let timestamp = Clock::get()
+                    .map(|clock| clock.unix_timestamp)
+                    .unwrap_or(0);
+                PositionDetails::new(
+                    *user_portfolio_account.key(),
+                    slab_idx,
+                    instrument_idx,
+                    vwap_px,      // entry price for first trade
+                    filled_qty,   // initial quantity
+                    timestamp,
+                    bump,
+                )
+            }
+        };
+
+        // Determine trade direction and position effect
+        let is_buy = split.side == 0;
+        let same_direction = (is_buy && current_exposure >= 0) || (!is_buy && current_exposure <= 0);
+
+        let realized_pnl = if same_direction || current_exposure == 0 {
+            // Adding to position or opening new position
+            msg!("Adding to position");
+            use pinocchio::sysvars::{clock::Clock, Sysvar};
+            let timestamp = Clock::get()
+                .map(|clock| clock.unix_timestamp)
+                .unwrap_or(0);
+            position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp);
+            0i128 // No realized PnL when adding
+        } else {
+            // Reducing position (opposite direction)
+            msg!("Reducing position");
+            use pinocchio::sysvars::{clock::Clock, Sysvar};
+            let timestamp = Clock::get()
+                .map(|clock| clock.unix_timestamp)
+                .unwrap_or(0);
+            let (pnl, new_qty) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+
+            // Check if position is fully closed
+            if new_qty == 0 {
+                msg!("Position closed, closing PDA");
+                close_position_details_pda(position_details_account, user_portfolio_account)?;
+            } else {
+                // Save updated PositionDetails
+                save_position_details(position_details_account, &position_details)?;
+            }
+
+            pnl
+        };
+
+        // If not closed, save PositionDetails (for add_to_position case or partial reduce)
+        if current_exposure != 0 || filled_qty != 0 {
+            if position_details.total_qty != 0 {
+                save_position_details(position_details_account, &position_details)?;
+            }
+        }
 
         total_realized_pnl = total_realized_pnl.saturating_add(realized_pnl);
 

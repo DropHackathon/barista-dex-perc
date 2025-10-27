@@ -317,17 +317,18 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         return Err(PercolatorError::InvalidOrderType.into());
     }
 
-    // Verify we have enough accounts: 7 base + num_splits slabs + num_splits receipts + num_splits oracles
-    let required_accounts = 7 + (num_splits * 3);
+    // Verify we have enough accounts: 7 base + num_splits slabs + num_splits receipts + num_splits oracles + num_splits position_details
+    let required_accounts = 7 + (num_splits * 4);
     if accounts.len() < required_accounts {
         msg!("Error: Insufficient accounts for ExecuteCrossSlab");
         return Err(PercolatorError::InvalidInstruction.into());
     }
 
-    // Split accounts into slabs, receipts, and oracles
+    // Split accounts into slabs, receipts, oracles, and position details
     let slab_accounts = &accounts[7..7 + num_splits];
     let receipt_accounts = &accounts[7 + num_splits..7 + num_splits * 2];
     let oracle_accounts = &accounts[7 + num_splits * 2..7 + num_splits * 3];
+    let position_details_accounts = &accounts[7 + num_splits * 3..7 + num_splits * 4];
 
     // Parse splits from instruction data (on stack, small)
     // Use a fixed-size buffer to avoid heap allocation
@@ -383,8 +384,10 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         slab_accounts,
         receipt_accounts,
         oracle_accounts,
+        position_details_accounts,
         splits,
         order_type,
+        program_id,
     )?;
 
     msg!("ExecuteCrossSlab processed successfully");

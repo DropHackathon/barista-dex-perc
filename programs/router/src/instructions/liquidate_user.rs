@@ -234,6 +234,14 @@ pub fn process_liquidate_user(
     // Clone the user pubkey before the mutable borrow to avoid borrow checker issues
     let user_pubkey = portfolio.user;
     use crate::instructions::process_execute_cross_slab;
+    use pinocchio::pubkey::Pubkey;
+
+    // TODO: Liquidation needs to support PositionDetails accounts
+    // For now, use empty slice - liquidations won't track PnL correctly
+    // This needs proper integration in Phase 2
+    let empty_position_details: &[AccountInfo] = &[];
+    let dummy_program_id = Pubkey::default();
+
     process_execute_cross_slab(
         portfolio_account,
         portfolio,
@@ -247,8 +255,10 @@ pub fn process_liquidate_user(
         &slab_accounts[..plan.split_count],
         &receipt_accounts[..plan.split_count],
         &oracle_accounts[..plan.split_count], // Pass oracles for validation
+        empty_position_details, // TODO: Add proper position details support
         plan.get_splits(),
         1, // Limit order (liquidations execute at specific prices)
+        &dummy_program_id, // TODO: Pass actual program_id
     )?;
     msg!("Liquidate: Execution complete via cross-slab logic");
 
