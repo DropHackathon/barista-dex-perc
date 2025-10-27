@@ -102,6 +102,7 @@ export class RouterClient {
 
   /**
    * Derive Registry PDA
+   * PDA seeds: ["registry"]
    * @returns [PDA, bump]
    */
   deriveRegistryPDA(): [PublicKey, number] {
@@ -1018,10 +1019,6 @@ export class RouterClient {
     const orderTypeBuffer = Buffer.from([orderType]);
     const splitBuffers = splits.map((split) => {
       const qtyBuffer = serializeI64(split.qty);
-      console.log('DEBUG SDK: Serializing split');
-      console.log('  qty (BN):', split.qty.toString());
-      console.log('  qty buffer (hex):', qtyBuffer.toString('hex'));
-      console.log('  qty buffer (bytes):', Array.from(qtyBuffer));
 
       return Buffer.concat([
         Buffer.from([split.side]),
@@ -1036,8 +1033,6 @@ export class RouterClient {
       orderTypeBuffer,
       ...splitBuffers
     );
-
-    console.log('DEBUG SDK: Full instruction data (hex):', data.toString('hex'));
 
     // Build account list (v0.5 layout):
     // 0. user_portfolio (writable)
@@ -1333,11 +1328,6 @@ export class RouterClient {
 
       // Only include non-zero positions
       if (!positionQty.isZero()) {
-        console.log(`DEBUG: Exposure ${i} - slabIndex=${slabIndex}, instrumentIndex=${instrumentIndex}`);
-        console.log(`  Raw bytes: [${Array.from(qtyBytes).join(', ')}]`);
-        console.log(`  Raw bytes (hex): ${qtyBytes.toString('hex')}`);
-        console.log(`  Deserialized qty: ${positionQty.toString()}`);
-
         exposures.push({
           slabIndex,
           instrumentIndex,
@@ -1556,17 +1546,9 @@ export class RouterClient {
     offset += 8;
 
     // Skip complex nested structs (insurance, pnl vesting, warmup, etc.)
-    // Estimated sizes based on Rust structs:
-    // - InsuranceParams: ~64 bytes
-    // - InsuranceState: ~64 bytes
-    // - PnlVestingParams: ~32 bytes
-    // - GlobalHaircut: ~64 bytes
-    // - AdaptiveWarmupConfig: ~64 bytes
-    // - AdaptiveWarmupState: ~64 bytes
-    // - total_deposits (i128): 16 bytes
-    // - _padding3: 8 bytes
-    // Total: ~376 bytes (approximate)
-    offset += 376;
+    // The slabs array starts at offset 680 (verified by searching for slab pubkey in account data)
+    // This accounts for all intermediate structs with proper alignment
+    offset = 680;
 
     // Now we're at the slabs array
     // SlabEntry struct size:
