@@ -425,9 +425,9 @@ export class RouterClient {
     const [portfolioPDA] = this.derivePortfolioPDA(user);
     const portfolio = await this.getPortfolio(portfolioPDA);
 
-    if (!portfolio) {
-      throw new Error('Portfolio not found. Please initialize portfolio first.');
-    }
+    // If portfolio doesn't exist, it will be auto-created with 0 equity
+    // Validation will fail (valid = false) but we return the calculation results
+    const availableEquity = portfolio ? new BN(portfolio.equity.toString()) : new BN(0);
 
     // Calculate margin committed: quantity_input * price / 1e6
     const marginCommitted = quantityInput.mul(price).div(new BN(1_000_000));
@@ -439,7 +439,6 @@ export class RouterClient {
     const actualQuantity = this.calculateActualQuantity(quantityInput, price, leverage);
 
     // Check if equity >= margin committed
-    const availableEquity = new BN(portfolio.equity.toString());
     const valid = availableEquity.gte(marginCommitted);
 
     return {
@@ -481,7 +480,8 @@ export class RouterClient {
     const portfolio = await this.getPortfolio(portfolioPDA);
 
     if (!portfolio) {
-      throw new Error('Portfolio not found. Please initialize portfolio first.');
+      // Portfolio doesn't exist yet - return 0 (will be auto-created on first trade)
+      return new BN(0);
     }
 
     const availableEquity = new BN(portfolio.equity.toString());
