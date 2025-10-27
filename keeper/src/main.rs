@@ -253,6 +253,7 @@ async fn run_oracle_command(subcommand: OracleCommands) -> Result<()> {
             };
 
             let oracle_program_id = oracle_program
+                .or_else(|| std::env::var("BARISTA_ORACLE_PROGRAM").ok())
                 .map(|s| s.parse::<Pubkey>())
                 .transpose()
                 .context("Invalid oracle program ID")?
@@ -298,6 +299,7 @@ async fn run_oracle_command(subcommand: OracleCommands) -> Result<()> {
             };
 
             let oracle_program_id = oracle_program
+                .or_else(|| std::env::var("BARISTA_ORACLE_PROGRAM").ok())
                 .map(|s| s.parse::<Pubkey>())
                 .transpose()
                 .context("Invalid oracle program ID")?
@@ -356,6 +358,7 @@ async fn run_oracle_command(subcommand: OracleCommands) -> Result<()> {
             };
 
             let oracle_program_id = oracle_program
+                .or_else(|| std::env::var("BARISTA_ORACLE_PROGRAM").ok())
                 .map(|s| s.parse::<Pubkey>())
                 .transpose()
                 .context("Invalid oracle program ID")?

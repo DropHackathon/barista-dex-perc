@@ -26,13 +26,21 @@ pub fn init_oracle(
     let oracle = Keypair::new();
     log::info!("Oracle address: {}", oracle.pubkey());
 
-    // Create instrument PDA (deterministic from name)
-    let instrument_seed = format!("{:\0<32}", instrument_name);
-    let (instrument_pubkey, _) = Pubkey::find_program_address(
-        &[b"instrument", instrument_seed.as_bytes()],
-        oracle_program_id,
-    );
-    log::info!("Instrument: {} ({})", instrument_name, instrument_pubkey);
+    // Try to parse instrument as pubkey first, otherwise derive PDA from name
+    let instrument_pubkey = if let Ok(pubkey) = instrument_name.parse::<Pubkey>() {
+        // Direct pubkey provided
+        log::info!("Using instrument pubkey: {}", pubkey);
+        pubkey
+    } else {
+        // Derive PDA from name (legacy behavior)
+        let instrument_seed = format!("{:\0<32}", instrument_name);
+        let (pubkey, _) = Pubkey::find_program_address(
+            &[b"instrument", instrument_seed.as_bytes()],
+            oracle_program_id,
+        );
+        log::info!("Derived instrument PDA: {} from name: {}", pubkey, instrument_name);
+        pubkey
+    };
 
     // Convert price to 1e6 scale
     let price_scaled = (initial_price * 1_000_000.0) as i64;
