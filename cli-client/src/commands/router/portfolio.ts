@@ -184,8 +184,16 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
             // - avg_entry_price (i64): 8 bytes at offset 48
             // - total_qty (i64): 8 bytes at offset 56
             // - realized_pnl (i128): 16 bytes at offset 64
+            // - total_fees (i128): 16 bytes at offset 80
+            // - trade_count (u32): 4 bytes at offset 96
+            // - _padding2: 4 bytes
+            // - last_update_ts (i64): 8 bytes at offset 104
+            // - margin_held (u128): 16 bytes at offset 112
+            // - leverage (u8): 1 byte at offset 128
             const entryPriceOffset = 48;
             const realizedPnlOffset = 64;
+            const marginHeldOffset = 112;
+            const leverageOffset = 128;
 
             entryPrice = new BN(data.readBigInt64LE(entryPriceOffset).toString());
             // Read i128 as two i64s (low, high)
@@ -194,6 +202,17 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
             // Combine into i128 (simplified for display)
             const realizedPnlValue = pnlLow; // Use low 64 bits for display
             realizedPnl = formatAmount(new BN(realizedPnlValue.toString()));
+
+            // Read margin_held (u128) - use low 64 bits for display
+            const marginLow = data.readBigInt64LE(marginHeldOffset);
+            const marginHeldLamports = new BN(marginLow.toString());
+
+            // Read leverage (u8)
+            const positionLeverage = data.readUInt8(leverageOffset);
+
+            // Store for later use in leverage calculation
+            (exp as any).marginHeld = marginHeldLamports;
+            (exp as any).positionLeverage = positionLeverage;
           }
         } catch (err) {
           console.log(chalk.gray(`  Warning: Failed to fetch PositionDetails: ${err}`));
@@ -259,11 +278,14 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           const notionalValue = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
           notional = formatAmount(notionalValue);
 
-          // We don't store per-position leverage, but can estimate from portfolio IM
-          // For now, show notional only. Leverage would require knowing the margin used for this specific position.
-          // Note: Portfolio.im is total IM across all positions, not per-position
-          // Effective leverage can't be accurately calculated without per-position IM tracking
-          effectiveLeverage = '—'; // TODO: Add per-position IM tracking
+          // Calculate effective leverage from margin_held stored in PositionDetails
+          const marginHeld = (exp as any).marginHeld as BN | undefined;
+          const positionLeverage = (exp as any).positionLeverage as number | undefined;
+
+          if (marginHeld && marginHeld.gt(new BN(0)) && positionLeverage) {
+            // Display the leverage that was used for this position
+            effectiveLeverage = `${positionLeverage}x`;
+          }
         }
 
         exposuresTable.push([
