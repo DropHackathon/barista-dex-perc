@@ -135,6 +135,33 @@ export class RouterClient {
     );
   }
 
+  /**
+   * Create ephemeral receipt account for trade execution
+   * Receipts are temporary accounts that the slab writes fill data to
+   * They're created per-transaction and can be discarded after
+   * @param payer Payer for the account creation
+   * @returns [instruction to create receipt, receipt keypair]
+   */
+  async createReceiptAccount(payer: PublicKey): Promise<[TransactionInstruction, Keypair]> {
+    // FillReceipt size: 48 bytes (u32 + u32 + i64*5)
+    const RECEIPT_SIZE = 48;
+    const lamports = await this.connection.getMinimumBalanceForRentExemption(RECEIPT_SIZE);
+
+    // Create ephemeral keypair for receipt
+    const receiptKeypair = Keypair.generate();
+
+    // Create account owned by System Program (writable by slab program via CPI)
+    const createIx = SystemProgram.createAccount({
+      fromPubkey: payer,
+      newAccountPubkey: receiptKeypair.publicKey,
+      lamports,
+      space: RECEIPT_SIZE,
+      programId: SystemProgram.programId,
+    });
+
+    return [createIx, receiptKeypair];
+  }
+
   // ============================================================================
   // Account Fetching Methods
   // ============================================================================
@@ -214,13 +241,17 @@ export class RouterClient {
       return null; // Slab account not found
     }
 
-    // Slab header layout: discriminator(8) + lp_owner(32) + ...
-    // lp_owner is at offset 8
-    if (accountInfo.data.length < 40) {
+    // SlabHeader layout (from programs/common/src/header.rs):
+    // - magic: [u8; 8] = offset 0-7
+    // - version: u32 = offset 8-11
+    // - seqno: u32 = offset 12-15
+    // - program_id: Pubkey = offset 16-47
+    // - lp_owner: Pubkey = offset 48-79
+    if (accountInfo.data.length < 80) {
       throw new Error('Invalid slab account data');
     }
 
-    const lpOwnerBytes = accountInfo.data.slice(8, 40);
+    const lpOwnerBytes = accountInfo.data.slice(48, 80);
     return new PublicKey(lpOwnerBytes);
   }
 
@@ -955,13 +986,13 @@ export class RouterClient {
    * @param user User's public key
    * @param splits Array of slab splits (each includes oracle and dlpOwner)
    * @param orderType Market (0) or Limit (1) order
-   * @returns TransactionInstruction
+   * @returns {instruction, receiptSetup, receiptKeypair} - execution instruction, receipt creation instruction, and receipt keypair
    */
   async buildExecuteCrossSlabInstruction(
     user: PublicKey,
     splits: SlabSplit[],
     orderType: ExecutionType = ExecutionType.Limit
-  ): Promise<TransactionInstruction> {
+  ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // v0.5: Single slab only (cross-slab routing disabled)
     if (splits.length !== 1) {
       throw new Error('v0.5 only supports single slab execution (cross-slab routing disabled)');
@@ -1023,22 +1054,24 @@ export class RouterClient {
       keys.push({ pubkey: split.slabMarket, isSigner: false, isWritable: true });
     }
 
-    // Add receipt PDAs (one per slab)
-    for (const split of splits) {
-      const [receiptPDA] = this.deriveReceiptPDA(split.slabMarket, user);
-      keys.push({ pubkey: receiptPDA, isSigner: false, isWritable: true });
-    }
+    // Create ephemeral receipt account (one per slab)
+    const [receiptSetup, receiptKeypair] = await this.createReceiptAccount(user);
+
+    // Add receipt account (writable, will be written by slab)
+    keys.push({ pubkey: receiptKeypair.publicKey, isSigner: false, isWritable: true });
 
     // Add oracle accounts
     for (const split of splits) {
       keys.push({ pubkey: split.oracle, isSigner: false, isWritable: false });
     }
 
-    return new TransactionInstruction({
+    const instruction = new TransactionInstruction({
       programId: this.programId,
       keys,
       data,
     });
+
+    return {instruction, receiptSetup, receiptKeypair};
   }
 
   /**
@@ -1622,7 +1655,7 @@ export class RouterClient {
    * @param limitPrice Maximum price willing to pay (1e6 scale)
    * @param oracle (Optional) Oracle price feed public key - auto-fetched if omitted
    * @param orderType Market or Limit order (default: Limit for v0 compatibility)
-   * @returns TransactionInstruction (async if oracle needs to be fetched)
+   * @returns {instruction, receiptSetup, receiptKeypair} - execution instruction, receipt creation instruction, and receipt keypair
    */
   async buildBuyInstruction(
     user: PublicKey,
@@ -1631,12 +1664,46 @@ export class RouterClient {
     limitPrice: BN,
     oracle?: PublicKey,
     orderType: ExecutionType = ExecutionType.Limit
-  ): Promise<TransactionInstruction> {
+  ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // Auto-fetch oracle if not provided
     const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
 
     if (!oracleAccount) {
       throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
+    }
+
+    // For market orders, fetch oracle price and use it with slippage buffer
+    let actualLimitPrice = limitPrice;
+    if (orderType === ExecutionType.Market) {
+      // Fetch current oracle price
+      const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
+      if (!oracleAccountInfo) {
+        throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+      }
+
+      // Parse oracle price (supports both Percolator and Pyth formats)
+      const priceData = oracleAccountInfo.data;
+      let oraclePrice: BN;
+
+      if (priceData.length === 128) {
+        // Percolator oracle format (localnet/testing)
+        // Price is i64 at offset 80 (after magic:8, version:1, bump:1, padding:6, authority:32, instrument:32)
+        const oraclePriceLow = priceData.readBigInt64LE(80);
+        oraclePrice = new BN(oraclePriceLow.toString());
+      } else if (priceData.length >= 216) {
+        // Pyth oracle format (mainnet)
+        // Price is at offset 208-216
+        const oraclePriceLow = priceData.readBigInt64LE(208);
+        oraclePrice = new BN(oraclePriceLow.toString());
+      } else {
+        throw new Error(`Invalid oracle account data: expected length 128 (Percolator) or >=216 (Pyth), got ${priceData.length}`);
+      }
+
+      // For market buy: set limit to oracle + 0.5% slippage buffer
+      // This ensures the order passes the slippage check in the router
+      const slippageBps = new BN(50); // 0.5% = 50 bps
+      const slippageAmount = oraclePrice.mul(slippageBps).div(new BN(10000));
+      actualLimitPrice = oraclePrice.add(slippageAmount);
     }
 
     // v0.5: Fetch DLP owner from slab for PnL settlement
@@ -1650,7 +1717,7 @@ export class RouterClient {
       slabMarket,
       side: 0, // Buy
       qty: quantity,
-      limitPx: limitPrice,
+      limitPx: actualLimitPrice,
       oracle: oracleAccount,
       dlpOwner, // Required for v0.5 PnL settlement
     };
@@ -1667,7 +1734,7 @@ export class RouterClient {
    * @param limitPrice Minimum price willing to accept (1e6 scale)
    * @param oracle (Optional) Oracle price feed public key - auto-fetched if omitted
    * @param orderType Market or Limit order (default: Limit for v0 compatibility)
-   * @returns TransactionInstruction (async if oracle needs to be fetched)
+   * @returns {instruction, receiptSetup, receiptKeypair} - execution instruction, receipt creation instruction, and receipt keypair
    */
   async buildSellInstruction(
     user: PublicKey,
@@ -1676,12 +1743,46 @@ export class RouterClient {
     limitPrice: BN,
     oracle?: PublicKey,
     orderType: ExecutionType = ExecutionType.Limit
-  ): Promise<TransactionInstruction> {
+  ): Promise<{instruction: TransactionInstruction, receiptSetup: TransactionInstruction, receiptKeypair: Keypair}> {
     // Auto-fetch oracle if not provided
     const oracleAccount = oracle || await this.getOracleForSlab(slabMarket);
 
     if (!oracleAccount) {
       throw new Error(`Oracle not found for slab ${slabMarket.toBase58()}. Slab may not be registered.`);
+    }
+
+    // For market orders, fetch oracle price and use it with slippage buffer
+    let actualLimitPrice = limitPrice;
+    if (orderType === ExecutionType.Market) {
+      // Fetch current oracle price
+      const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
+      if (!oracleAccountInfo) {
+        throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+      }
+
+      // Parse oracle price (supports both Percolator and Pyth formats)
+      const priceData = oracleAccountInfo.data;
+      let oraclePrice: BN;
+
+      if (priceData.length === 128) {
+        // Percolator oracle format (localnet/testing)
+        // Price is i64 at offset 80 (after magic:8, version:1, bump:1, padding:6, authority:32, instrument:32)
+        const oraclePriceLow = priceData.readBigInt64LE(80);
+        oraclePrice = new BN(oraclePriceLow.toString());
+      } else if (priceData.length >= 216) {
+        // Pyth oracle format (mainnet)
+        // Price is at offset 208-216
+        const oraclePriceLow = priceData.readBigInt64LE(208);
+        oraclePrice = new BN(oraclePriceLow.toString());
+      } else {
+        throw new Error(`Invalid oracle account data: expected length 128 (Percolator) or >=216 (Pyth), got ${priceData.length}`);
+      }
+
+      // For market sell: set limit to oracle - 0.5% slippage buffer
+      // This ensures the order passes the slippage check in the router
+      const slippageBps = new BN(50); // 0.5% = 50 bps
+      const slippageAmount = oraclePrice.mul(slippageBps).div(new BN(10000));
+      actualLimitPrice = oraclePrice.sub(slippageAmount);
     }
 
     // v0.5: Fetch DLP owner from slab for PnL settlement
@@ -1695,7 +1796,7 @@ export class RouterClient {
       slabMarket,
       side: 1, // Sell
       qty: quantity,
-      limitPx: limitPrice,
+      limitPx: actualLimitPrice,  // Uses oracle price for market orders
       oracle: oracleAccount,
       dlpOwner, // Required for v0.5 PnL settlement
     };

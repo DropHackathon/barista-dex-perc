@@ -1,6 +1,6 @@
 {
   "name": "@barista-dex/sdk",
-  "version": "0.1.24",
+  "version": "0.1.29",
   "description": "TypeScript SDK for interacting with Barista DEX programs on Solana",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -32,7 +32,7 @@
   "author": "Barista DEX",
   "license": "MIT",
   "dependencies": {
-    "@barista-dex/sdk": "^0.1.18",
+    "@barista-dex/sdk": "^0.1.25",
     "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.87.6",
     "bn.js": "^5.2.1",

@@ -241,7 +241,7 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     const orderType = isMarketOrder ? ExecutionType.Market : ExecutionType.Limit;
 
     spinner.text = 'Building buy instruction...';
-    const buyIx = await client.buildBuyInstruction(
+    const {instruction: buyIx, receiptSetup, receiptKeypair} = await client.buildBuyInstruction(
       wallet.publicKey,
       slabMarket,
       validation.actualQuantity,  // Use leveraged quantity!
@@ -249,10 +249,6 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       oraclePublicKey,  // Oracle from CLI or auto-fetched from SlabRegistry
       orderType   // Market order if no price provided, Limit if price specified
     );
-
-    if (!buyIx) {
-      throw new Error('Failed to build buy instruction');
-    }
 
     spinner.text = 'Creating transaction...';
     const transaction = new Transaction();
@@ -264,7 +260,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       }
     }
 
-    // Add buy instruction
+    // Add receipt setup and buy instruction
+    transaction.add(receiptSetup);
     transaction.add(buyIx);
 
     // Send and confirm transaction
@@ -272,7 +269,7 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     const signature = await sendAndConfirmTransaction(
       connection,
       transaction,
-      [wallet],
+      [wallet, receiptKeypair],  // Receipt keypair must sign for account creation
       { commitment: 'confirmed' }
     );
 
