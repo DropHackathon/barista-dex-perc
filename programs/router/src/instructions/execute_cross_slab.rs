@@ -511,14 +511,8 @@ pub fn process_execute_cross_slab(
 
         total_realized_pnl = total_realized_pnl.saturating_add(realized_pnl);
 
-        // Update exposure: Buy = add qty, Sell = subtract qty
-        let new_exposure = if split.side == 0 {
-            // Buy
-            current_exposure + filled_qty
-        } else {
-            // Sell
-            current_exposure - filled_qty
-        };
+        // Update exposure: filled_qty is signed (+buy, -sell from receipt)
+        let new_exposure = current_exposure + filled_qty;
 
         user_portfolio.update_exposure(slab_idx, instrument_idx, new_exposure);
     }
@@ -665,7 +659,12 @@ fn settle_pnl(
     user_portfolio.pnl = user_portfolio.pnl.saturating_add(realized_pnl);
     dlp_portfolio.pnl = dlp_portfolio.pnl.saturating_sub(realized_pnl);
 
-    // Perform actual SOL transfer
+    // Update equity to reflect the PnL change
+    user_portfolio.equity = user_portfolio.equity.saturating_add(realized_pnl);
+    dlp_portfolio.equity = dlp_portfolio.equity.saturating_sub(realized_pnl);
+
+    // Perform actual SOL transfer using direct lamport manipulation
+    // Both accounts are owned by the same program, so we can directly modify lamports
     if realized_pnl > 0 {
         // User won → Transfer SOL from DLP to User
         let profit = realized_pnl as u64;
@@ -676,48 +675,11 @@ fn settle_pnl(
             return Err(PercolatorError::InsufficientFunds);
         }
 
-        // Build System Program transfer instruction
-        let mut instruction_data = [0u8; 12];
-        instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
-        instruction_data[4..12].copy_from_slice(&profit.to_le_bytes()); // Amount
-
-        use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
-        use pinocchio::program::invoke_signed;
-
-        let transfer_instruction = Instruction {
-            program_id: system_program.key(),
-            accounts: &[
-                AccountMeta {
-                    pubkey: dlp_portfolio_account.key(),
-                    is_signer: true, // DLP portfolio signs via PDA
-                    is_writable: true,
-                },
-                AccountMeta {
-                    pubkey: user_portfolio_account.key(),
-                    is_signer: false,
-                    is_writable: true,
-                },
-            ],
-            data: &instruction_data,
-        };
-
-        // Sign with DLP portfolio PDA seeds
-        let dlp_owner = dlp_portfolio.user;
-        let dlp_bump = dlp_portfolio.bump;
-        let bump_bytes = [dlp_bump];
-        let seeds = [
-            Seed::from(b"portfolio" as &[u8]),
-            Seed::from(dlp_owner.as_ref()),
-            Seed::from(&bump_bytes[..]),
-        ];
-        let signer = Signer::from(&seeds);
-
-        invoke_signed(
-            &transfer_instruction,
-            &[dlp_portfolio_account, user_portfolio_account, system_program],
-            &[signer],
-        )
-        .map_err(|_| PercolatorError::InsufficientFunds)?;
+        // Direct lamport manipulation (both accounts owned by same program)
+        *dlp_portfolio_account.try_borrow_mut_lamports()
+            .map_err(|_| PercolatorError::InsufficientFunds)? -= profit;
+        *user_portfolio_account.try_borrow_mut_lamports()
+            .map_err(|_| PercolatorError::InsufficientFunds)? += profit;
 
         msg!("User profit transferred from DLP portfolio");
     } else {
@@ -730,48 +692,11 @@ fn settle_pnl(
             return Err(PercolatorError::InsufficientFunds);
         }
 
-        // Build System Program transfer instruction
-        let mut instruction_data = [0u8; 12];
-        instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
-        instruction_data[4..12].copy_from_slice(&loss.to_le_bytes()); // Amount
-
-        use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
-        use pinocchio::program::invoke_signed;
-
-        let transfer_instruction = Instruction {
-            program_id: system_program.key(),
-            accounts: &[
-                AccountMeta {
-                    pubkey: user_portfolio_account.key(),
-                    is_signer: true, // User portfolio signs via PDA
-                    is_writable: true,
-                },
-                AccountMeta {
-                    pubkey: dlp_portfolio_account.key(),
-                    is_signer: false,
-                    is_writable: true,
-                },
-            ],
-            data: &instruction_data,
-        };
-
-        // Sign with user portfolio PDA seeds
-        let user_owner = user_portfolio.user;
-        let user_bump = user_portfolio.bump;
-        let bump_bytes = [user_bump];
-        let seeds = [
-            Seed::from(b"portfolio" as &[u8]),
-            Seed::from(user_owner.as_ref()),
-            Seed::from(&bump_bytes[..]),
-        ];
-        let signer = Signer::from(&seeds);
-
-        invoke_signed(
-            &transfer_instruction,
-            &[user_portfolio_account, dlp_portfolio_account, system_program],
-            &[signer],
-        )
-        .map_err(|_| PercolatorError::InsufficientFunds)?;
+        // Direct lamport manipulation (both accounts owned by same program)
+        *user_portfolio_account.try_borrow_mut_lamports()
+            .map_err(|_| PercolatorError::InsufficientFunds)? -= loss;
+        *dlp_portfolio_account.try_borrow_mut_lamports()
+            .map_err(|_| PercolatorError::InsufficientFunds)? += loss;
 
         msg!("User loss transferred to DLP portfolio");
     }
