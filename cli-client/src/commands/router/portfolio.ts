@@ -172,7 +172,7 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           );
 
           const positionDetailsAccount = await connection.getAccountInfo(positionDetailsPda);
-          if (positionDetailsAccount && positionDetailsAccount.data.length >= 144) {
+          if (positionDetailsAccount && positionDetailsAccount.data.length >= 136) {
             const data = positionDetailsAccount.data;
             // PositionDetails layout:
             // - magic (u64): 8 bytes
