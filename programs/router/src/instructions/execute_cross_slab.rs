@@ -3,7 +3,7 @@
 use crate::state::{Portfolio, SlabRegistry, PositionDetails, POSITION_DETAILS_SIZE};
 use crate::oracle::{OracleAdapter, CustomAdapter, PythAdapter};
 use percolator_common::*;
-use pinocchio::{account_info::AccountInfo, msg, pubkey::Pubkey};
+use pinocchio::{account_info::AccountInfo, msg, pubkey::Pubkey, sysvars::{rent::Rent, Sysvar}};
 
 // TODO: Replace with actual Pyth program IDs for mainnet/devnet
 // - Mainnet: TBD
@@ -657,6 +657,157 @@ fn settle_pnl(
         msg!("User loss transferred to DLP portfolio");
     }
 
+    Ok(())
+}
+
+/// Load PositionDetails from account data
+///
+/// # Returns
+/// * `Some(PositionDetails)` if account exists and is valid
+/// * `None` if account is not initialized (first trade for this position)
+fn load_position_details(account: &AccountInfo) -> Result<Option<PositionDetails>, PercolatorError> {
+    // Check if account is initialized (has data and lamports)
+    if account.data_len() == 0 || account.lamports() == 0 {
+        return Ok(None);
+    }
+
+    // Verify account size
+    if account.data_len() != POSITION_DETAILS_SIZE {
+        msg!("Error: PositionDetails account has wrong size");
+        return Err(PercolatorError::InvalidAccount);
+    }
+
+    // Deserialize
+    let data = account.try_borrow_data()
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+    let details = unsafe {
+        &*(data.as_ptr() as *const PositionDetails)
+    };
+
+    // Validate magic bytes
+    if !details.validate() {
+        msg!("Error: PositionDetails magic bytes invalid");
+        return Err(PercolatorError::InvalidAccount);
+    }
+
+    Ok(Some(*details))
+}
+
+/// Save PositionDetails to account data
+fn save_position_details(
+    account: &AccountInfo,
+    details: &PositionDetails,
+) -> Result<(), PercolatorError> {
+    if account.data_len() != POSITION_DETAILS_SIZE {
+        msg!("Error: PositionDetails account has wrong size");
+        return Err(PercolatorError::InvalidAccount);
+    }
+
+    let mut data = account.try_borrow_mut_data()
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+    let dest = unsafe {
+        &mut *(data.as_mut_ptr() as *mut PositionDetails)
+    };
+    *dest = *details;
+
+    Ok(())
+}
+
+/// Create PositionDetails PDA account
+///
+/// Uses System Program to allocate account and assign to router program
+fn create_position_details_pda(
+    position_details_account: &AccountInfo,
+    portfolio_pda: &Pubkey,
+    slab_index: u16,
+    instrument_index: u16,
+    payer: &AccountInfo,
+    system_program: &AccountInfo,
+    program_id: &Pubkey,
+    bump: u8,
+) -> Result<(), PercolatorError> {
+    use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
+    use pinocchio::program::invoke_signed;
+
+    // Calculate rent
+    let rent = Rent::get().map_err(|_| PercolatorError::InvalidAccount)?;
+    let lamports = rent.minimum_balance(POSITION_DETAILS_SIZE);
+
+    // Build seeds for PDA signing
+    let slab_idx_bytes = slab_index.to_le_bytes();
+    let instrument_idx_bytes = instrument_index.to_le_bytes();
+    let bump_bytes = [bump];
+
+    let seeds = [
+        Seed::from(b"position" as &[u8]),
+        Seed::from(portfolio_pda.as_ref()),
+        Seed::from(&slab_idx_bytes[..]),
+        Seed::from(&instrument_idx_bytes[..]),
+        Seed::from(&bump_bytes[..]),
+    ];
+
+    // Build System Program CreateAccount instruction
+    // Discriminator: 0 (CreateAccount)
+    let mut instruction_data = [0u8; 52];
+    instruction_data[0..4].copy_from_slice(&0u32.to_le_bytes());
+    instruction_data[4..12].copy_from_slice(&lamports.to_le_bytes());
+    instruction_data[12..20].copy_from_slice(&(POSITION_DETAILS_SIZE as u64).to_le_bytes());
+    instruction_data[20..52].copy_from_slice(program_id.as_ref());
+
+    let create_instruction = Instruction {
+        program_id: system_program.key(),
+        accounts: &[
+            AccountMeta {
+                pubkey: payer.key(),
+                is_signer: true,
+                is_writable: true,
+            },
+            AccountMeta {
+                pubkey: position_details_account.key(),
+                is_signer: false,
+                is_writable: true,
+            },
+        ],
+        data: &instruction_data,
+    };
+
+    let signer = Signer::from(&seeds);
+    invoke_signed(
+        &create_instruction,
+        &[payer, position_details_account, system_program],
+        &[signer],
+    )
+    .map_err(|_| {
+        msg!("Error: Failed to create PositionDetails PDA");
+        PercolatorError::InvalidAccount
+    })?;
+
+    msg!("PositionDetails PDA created");
+    Ok(())
+}
+
+/// Close PositionDetails PDA and refund rent to user
+fn close_position_details_pda(
+    position_details_account: &AccountInfo,
+    recipient: &AccountInfo,
+) -> Result<(), PercolatorError> {
+    // Transfer all lamports to recipient
+    let lamports = position_details_account.lamports();
+
+    *position_details_account.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InvalidAccount)? = 0;
+    *recipient.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InvalidAccount)? = recipient
+        .lamports()
+        .checked_add(lamports)
+        .ok_or(PercolatorError::Overflow)?;
+
+    // Zero out data
+    let mut data = position_details_account.try_borrow_mut_data()
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+    data.fill(0);
+
+    msg!("PositionDetails PDA closed, rent refunded");
     Ok(())
 }
 
