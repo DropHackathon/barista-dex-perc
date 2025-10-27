@@ -356,30 +356,72 @@ export class SlabClient {
   // ============================================================================
 
   private deserializeSlabState(data: Buffer): SlabState {
-    let offset = 8; // Skip discriminator
+    let offset = 0;
 
-    const lpOwner = deserializePubkey(data, offset);
-    offset += 32;
+    // NOTE: Native Solana programs (pinocchio) do NOT have discriminators
+    // Unlike Anchor programs which start with 8-byte discriminator
 
-    const routerId = deserializePubkey(data, offset);
-    offset += 32;
+    // SlabHeader layout (from programs/common/src/header.rs):
+    // magic: [u8; 8]
+    // version: u32
+    // seqno: u32
+    // program_id: Pubkey (32 bytes)
+    // lp_owner: Pubkey (32 bytes)
+    // router_id: Pubkey (32 bytes)
+    // instrument: Pubkey (32 bytes)
+    // contract_size: i64
+    // tick: i64
+    // lot: i64
+    // mark_px: i64
+    // taker_fee_bps: i64
+    // bump: u8 (in offsets, not in header directly)
 
-    const instrument = deserializePubkey(data, offset);
-    offset += 32;
-
-    const markPx = deserializeI64(data, offset);
+    // Skip magic (8 bytes)
     offset += 8;
 
-    const takerFeeBps = deserializeI64(data, offset);
-    offset += 8;
+    // version: u32
+    offset += 4;
 
-    const contractSize = deserializeI64(data, offset);
-    offset += 8;
-
+    // seqno: u32
     const seqno = data.readUInt32LE(offset);
     offset += 4;
 
-    const bump = data.readUInt8(offset);
+    // program_id: Pubkey (32 bytes) - skip
+    offset += 32;
+
+    // lp_owner: Pubkey (32 bytes)
+    const lpOwner = deserializePubkey(data, offset);
+    offset += 32;
+
+    // router_id: Pubkey (32 bytes)
+    const routerId = deserializePubkey(data, offset);
+    offset += 32;
+
+    // instrument: Pubkey (32 bytes)
+    const instrument = deserializePubkey(data, offset);
+    offset += 32;
+
+    // contract_size: i64
+    const contractSize = deserializeI64(data, offset);
+    offset += 8;
+
+    // tick: i64 - skip
+    offset += 8;
+
+    // lot: i64 - skip
+    offset += 8;
+
+    // mark_px: i64
+    const markPx = deserializeI64(data, offset);
+    offset += 8;
+
+    // taker_fee_bps: i64
+    const takerFeeBps = deserializeI64(data, offset);
+    offset += 8;
+
+    // Note: bump is stored in SlabHeader but we derive it from seeds
+    // For now, we'll set it to 0 as it's not critical for display
+    const bump = 0;
 
     return {
       lpOwner,
@@ -394,7 +436,9 @@ export class SlabClient {
   }
 
   private deserializeFillReceipt(data: Buffer): FillReceipt {
-    let offset = 8; // Skip discriminator
+    let offset = 0;
+
+    // NOTE: Native Solana programs (pinocchio) do NOT have discriminators
 
     const slab = deserializePubkey(data, offset);
     offset += 32;

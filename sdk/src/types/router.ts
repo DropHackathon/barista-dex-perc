@@ -3,12 +3,13 @@ import BN from 'bn.js';
 
 /**
  * Router instruction discriminators
+ * IMPORTANT: These must match programs/router/src/entrypoint.rs exactly
  */
 export enum RouterInstruction {
   Initialize = 0,
-  Deposit = 1,
-  Withdraw = 2,
-  InitializePortfolio = 3,
+  InitializePortfolio = 1,
+  Deposit = 2,
+  Withdraw = 3,
   ExecuteCrossSlab = 4,
   LiquidateUser = 5,
   BurnLpShares = 6,
@@ -149,13 +150,17 @@ export interface Registry {
 }
 
 /**
- * Vault account structure
+ * Vault account storing collateral for a specific mint
+ * PDA: ["vault", router_id, mint]
+ * Source: programs/router/src/state/vault.rs
  */
 export interface Vault {
-  mint: PublicKey;
-  totalDeposits: BN;
-  totalWithdrawals: BN;
-  balance: BN;
+  routerId: PublicKey;      // 32 bytes
+  mint: PublicKey;          // 32 bytes
+  tokenAccount: PublicKey;  // 32 bytes
+  balance: BN;              // u128 (16 bytes)
+  totalPledged: BN;         // u128 (16 bytes)
+  bump: number;             // u8 (1 byte)
 }
 
 /**

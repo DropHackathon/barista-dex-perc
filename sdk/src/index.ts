@@ -87,4 +87,10 @@ export {
   SLAB_PROGRAM_IDS,
   getProgramIds,
   getRpcEndpoint,
+  PORTFOLIO_SIZE,
+  SLAB_SIZE,
+  MAX_SLABS,
+  MAX_INSTRUMENTS,
+  MAX_LP_BUCKETS,
+  MAX_OPEN_ORDERS,
 } from './constants';

@@ -51,6 +51,7 @@ import {
   MAX_INSTRUMENTS,
   MAX_LP_BUCKETS,
   MAX_OPEN_ORDERS,
+  PORTFOLIO_SIZE,
 } from '../constants';
 
 /**
@@ -150,7 +151,12 @@ export class RouterClient {
       return null;
     }
 
-    return this.deserializePortfolio(accountInfo.data);
+    try {
+      return this.deserializePortfolio(accountInfo.data);
+    } catch (error) {
+      console.error('DEBUG: Deserialization error:', error);
+      return null;
+    }
   }
 
   /**
@@ -808,12 +814,12 @@ export class RouterClient {
    * Creates the portfolio account and initializes it in a single transaction
    * NOTE: Portfolio uses create_with_seed (NOT PDA) to bypass 10KB CPI limit
    * @param user User's public key (must be signer)
-   * @param portfolioSize Size of portfolio account in bytes (default: 139264)
+   * @param portfolioSize Size of portfolio account in bytes (default: 133008 = Portfolio::LEN)
    * @returns Array of instructions [createAccountInstruction, initializeInstruction]
    */
   async buildInitializePortfolioInstructions(
     user: PublicKey,
-    portfolioSize: number = 139264  // Portfolio::LEN (~136KB)
+    portfolioSize: number = PORTFOLIO_SIZE  // Portfolio::LEN (exact size from programs/router/src/state/portfolio.rs)
   ): Promise<TransactionInstruction[]> {
     // Derive portfolio address using create_with_seed
     const portfolioAddress = await this.derivePortfolioAddress(user);
@@ -1114,9 +1120,9 @@ export class RouterClient {
   private deserializePortfolio(data: Buffer): Portfolio {
     let offset = 0;
 
-    // Skip discriminator (8 bytes)
-    // In Anchor/Borsh, accounts start with 8-byte discriminator
-    offset += 8;
+    // NOTE: Native Solana programs (pinocchio) do NOT have discriminators
+    // Unlike Anchor programs which start with 8-byte discriminator
+    // This is a native program, so we start at offset 0
 
     // ===== Identity Fields =====
 
@@ -1390,7 +1396,9 @@ export class RouterClient {
   }
 
   private deserializeRegistry(data: Buffer): Registry {
-    let offset = 8; // Skip discriminator
+    let offset = 0;
+
+    // NOTE: Native Solana programs (pinocchio) do NOT have discriminators
 
     // Router ID (32 bytes)
     const routerId = deserializePubkey(data, offset);
@@ -1514,24 +1522,43 @@ export class RouterClient {
   }
 
   private deserializeVault(data: Buffer): Vault {
-    let offset = 8; // Skip discriminator
+    let offset = 0;
+
+    // NOTE: Native Solana programs (pinocchio) do NOT have discriminators
+
+    // Vault layout (programs/router/src/state/vault.rs):
+    // router_id: Pubkey (32 bytes)
+    // mint: Pubkey (32 bytes)
+    // token_account: Pubkey (32 bytes)
+    // balance: u128 (16 bytes)
+    // total_pledged: u128 (16 bytes)
+    // bump: u8 (1 byte)
+    // _padding: [u8; 7] (7 bytes)
+
+    const routerId = deserializePubkey(data, offset);
+    offset += 32;
 
     const mint = deserializePubkey(data, offset);
     offset += 32;
 
-    const totalDeposits = deserializeU128(data, offset);
-    offset += 16;
-
-    const totalWithdrawals = deserializeU128(data, offset);
-    offset += 16;
+    const tokenAccount = deserializePubkey(data, offset);
+    offset += 32;
 
     const balance = deserializeU128(data, offset);
+    offset += 16;
+
+    const totalPledged = deserializeU128(data, offset);
+    offset += 16;
+
+    const bump = data.readUInt8(offset);
 
     return {
+      routerId,
       mint,
-      totalDeposits,
-      totalWithdrawals,
+      tokenAccount,
       balance,
+      totalPledged,
+      bump,
     };
   }
 

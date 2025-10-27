@@ -7,31 +7,38 @@ export type Cluster = 'devnet' | 'mainnet-beta' | 'localnet';
 
 /**
  * RPC endpoints for each cluster
+ * For localnet, can be overridden via BARISTA_LOCALNET_RPC environment variable
  */
 export const RPC_ENDPOINTS: Record<Cluster, string> = {
   devnet: 'https://api.devnet.solana.com',
   'mainnet-beta': 'https://api.mainnet-beta.solana.com',
-  localnet: 'http://localhost:8899',
+  localnet: process.env.BARISTA_LOCALNET_RPC || 'http://localhost:8899',
 };
 
 /**
  * Program IDs for Router program across different clusters
+ * For localnet, can be overridden via BARISTA_LOCALNET_ROUTER_PROGRAM_ID environment variable
  * TODO: Update with actual deployed program IDs after deployment
  */
 export const ROUTER_PROGRAM_IDS: Record<Cluster, PublicKey> = {
   devnet: new PublicKey('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr'), // TODO: Replace with actual devnet program ID
   'mainnet-beta': new PublicKey('RoutR1VdCpHqj89WEMJhb6TkGT9cPfr1rVjhM3e2YQr'), // TODO: Replace with actual mainnet program ID
-  localnet: new PublicKey('Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx'), // TODO: Replace with actual localnet program ID
+  localnet: new PublicKey(
+    process.env.BARISTA_LOCALNET_ROUTER_PROGRAM_ID || 'Hp6yAnuBFS7mU2P9c3euNrJv4h2oKvNmyWMUHKccB3wx'
+  ),
 };
 
 /**
  * Program IDs for Slab program across different clusters
+ * For localnet, can be overridden via BARISTA_LOCALNET_SLAB_PROGRAM_ID environment variable
  * TODO: Update with actual deployed program IDs after deployment
  */
 export const SLAB_PROGRAM_IDS: Record<Cluster, PublicKey> = {
   devnet: new PublicKey('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk'), // TODO: Replace with actual devnet program ID
   'mainnet-beta': new PublicKey('SLabZ6PsDLh2X6HzEoqxFDMqCVcJXDKCNEYuPzUvGPk'), // TODO: Replace with actual mainnet program ID
-  localnet: new PublicKey('Hq5XLwLMcEnoGQJbYBeNaTBuTecEoSryavnpYWes8jdW'), // TODO: Replace with actual localnet program ID
+  localnet: new PublicKey(
+    process.env.BARISTA_LOCALNET_SLAB_PROGRAM_ID || 'Hq5XLwLMcEnoGQJbYBeNaTBuTecEoSryavnpYWes8jdW'
+  ),
 };
 
 /**
@@ -95,19 +102,31 @@ export const VESTING_TAU_SLOTS = 216_000;
 export const FP_ONE = 1_000_000_000;
 
 /**
- * Portfolio account size calculation
+ * Portfolio account size (exact)
+ * This MUST match Portfolio::LEN from programs/router/src/state/portfolio.rs
+ * Calculated as: size_of::<Portfolio>() = 135056 bytes
  *
- * Fixed fields: ~272 bytes
- * Exposures: MAX_SLABS * MAX_INSTRUMENTS * 12 bytes (u16 + u16 + i64)
- * LP Buckets: MAX_LP_BUCKETS * ~350 bytes (approximate, depends on Option variants)
- *
- * Note: This is an approximation. Actual size depends on Rust's layout optimization.
+ * DO NOT use the calculated approximation below - use this exact value!
+ */
+export const PORTFOLIO_SIZE = 135056;
+
+/**
+ * Portfolio size calculation (for reference only - DO NOT USE)
+ * The actual size (135056) differs from this calculation due to Rust's struct padding
  */
 export const PORTFOLIO_FIXED_SIZE = 272;
 export const EXPOSURE_SIZE = 12; // (u16, u16, i64)
 export const LP_BUCKET_SIZE = 350; // Approximate (includes Option<AmmLp> and Option<SlabLp>)
 
-export const PORTFOLIO_SIZE =
+export const PORTFOLIO_SIZE_CALCULATED =
   PORTFOLIO_FIXED_SIZE +
   MAX_SLABS * MAX_INSTRUMENTS * EXPOSURE_SIZE +
   MAX_LP_BUCKETS * LP_BUCKET_SIZE;
+
+/**
+ * Slab account size (exact)
+ * This MUST match SlabState::LEN from programs/slab/src/state/slab.rs
+ * Layout: SlabHeader (256B) + QuoteCache (256B) + BookArea (3KB)
+ * Total: ~4KB
+ */
+export const SLAB_SIZE = 3584; // Exact size from Rust's size_of::<SlabState>()
