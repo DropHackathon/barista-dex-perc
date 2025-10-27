@@ -60,12 +60,21 @@ export async function slabInfoCommand(options: SlabInfoOptions): Promise<void> {
     const priceStr = `$${formatAmount(state.markPx, 6)}`;
     const feeNum = state.takerFeeBps.toNumber();
     const feeStr = `${(feeNum / 100).toFixed(2)}%`;
-    console.log(`  Mark Price:      ${priceStr}`);
+    const isLocalnet = rpcUrl.includes('localhost') || rpcUrl.includes('127.0.0.1');
+
+    if (isLocalnet) {
+      console.log(`  Mark Price:      ${priceStr} ${chalk.yellow('(cached - use oracle price)')}`);
+    } else {
+      console.log(`  Mark Price:      ${priceStr}`);
+    }
     console.log(`  Contract Size:   ${state.contractSize.toString()}`);
     console.log(`  Taker Fee:       ${feeStr}`);
     console.log(`  Sequence Number: ${state.seqno}`);
     console.log();
     console.log(chalk.gray('Note: v0 uses atomic fills only (no resting orders)'));
+    if (isLocalnet) {
+      console.log(chalk.yellow('Note: Mark price is cached. Use oracle price for actual trading.'));
+    }
     console.log(chalk.bold.cyan('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
   } catch (error: any) {
     spinner.fail();

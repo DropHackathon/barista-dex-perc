@@ -37,18 +37,23 @@ export async function slabsCommand(options: SlabsOptions): Promise<void> {
       return;
     }
 
+    const isLocalnet = rpcUrl.includes('localhost') || rpcUrl.includes('127.0.0.1');
+
     console.log(chalk.bold.cyan(`\nFound ${slabs.length} slab(s):\n`));
 
-    // Create table
+    // Create table (no colWidths to allow full addresses)
+    const markPriceHeader = isLocalnet
+      ? chalk.cyan('Mark Price') + chalk.yellow(' (cached)')
+      : chalk.cyan('Mark Price');
+
     const table = new Table({
       head: [
         chalk.cyan('Slab Address'),
         chalk.cyan('LP Owner'),
         chalk.cyan('Instrument'),
-        chalk.cyan('Mark Price'),
+        markPriceHeader,
         chalk.cyan('Taker Fee'),
       ],
-      colWidths: [20, 20, 20, 18, 14],
     });
 
     // Add rows
@@ -70,7 +75,10 @@ export async function slabsCommand(options: SlabsOptions): Promise<void> {
 
     console.log(table.toString());
     console.log();
-    console.log(chalk.gray('Use "barista slab info --slab <address>" to see details'));
+    if (isLocalnet) {
+      console.log(chalk.yellow('Note: Mark prices are cached. Use "barista price --oracle <address>" for current oracle price.'));
+    }
+    console.log(chalk.gray('Use "barista slab --slab <address>" to see full details'));
     console.log();
   } catch (error: any) {
     spinner.fail();
