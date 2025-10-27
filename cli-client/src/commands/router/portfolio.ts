@@ -116,8 +116,8 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       console.log(chalk.bold('\n📍 Trading Positions\n'));
 
       const exposuresTable = new Table({
-        head: ['Slab', 'Instrument', 'Position Qty', 'Mark Price', 'Notional Value'],
-        colWidths: [45, 45, 15, 15, 18],
+        head: ['Slab', 'Instrument', 'Position Qty', 'Entry Price', 'Mark Price', 'Unrealized PnL', 'Realized PnL'],
+        colWidths: [30, 30, 15, 15, 15, 18, 18],
       });
 
       // Resolve slab addresses from registry
@@ -158,7 +158,46 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
         // Fetch instrument address and price
         let instrumentAddress = `Unknown (Index ${exp.instrumentIndex})`;
         let markPrice = new BN(0);
-        let notionalValue = '—';
+        let entryPrice = new BN(0);
+        let realizedPnl = '—';
+        let unrealizedPnl = '—';
+
+        // Fetch PositionDetails for entry price and realized PnL
+        try {
+          const portfolioPda = await client.derivePortfolioAddress(userAddress);
+          const [positionDetailsPda] = client.derivePositionDetailsPDA(
+            portfolioPda,
+            exp.slabIndex,
+            exp.instrumentIndex
+          );
+
+          const positionDetailsAccount = await connection.getAccountInfo(positionDetailsPda);
+          if (positionDetailsAccount && positionDetailsAccount.data.length >= 144) {
+            const data = positionDetailsAccount.data;
+            // PositionDetails layout:
+            // - magic (u64): 8 bytes
+            // - portfolio (Pubkey): 32 bytes
+            // - slab_index (u16): 2 bytes
+            // - instrument_index (u16): 2 bytes
+            // - bump (u8): 1 byte
+            // - _padding1: 3 bytes
+            // - avg_entry_price (i64): 8 bytes at offset 48
+            // - total_qty (i64): 8 bytes at offset 56
+            // - realized_pnl (i128): 16 bytes at offset 64
+            const entryPriceOffset = 48;
+            const realizedPnlOffset = 64;
+
+            entryPrice = new BN(data.readBigInt64LE(entryPriceOffset).toString());
+            // Read i128 as two i64s (low, high)
+            const pnlLow = data.readBigInt64LE(realizedPnlOffset);
+            const pnlHigh = data.readBigInt64LE(realizedPnlOffset + 8);
+            // Combine into i128 (simplified for display)
+            const realizedPnlValue = pnlLow; // Use low 64 bits for display
+            realizedPnl = formatAmount(new BN(realizedPnlValue.toString()));
+          }
+        } catch (err) {
+          console.log(chalk.gray(`  Warning: Failed to fetch PositionDetails: ${err}`));
+        }
 
         if (slabEntry && slabEntry.active) {
           try {
@@ -198,12 +237,12 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
               }
             }
 
-            // Calculate notional value if we have a price
-            if (!markPrice.isZero()) {
-              // position_qty * mark_price (both in 1e6 scale)
-              // Result needs to be divided by 1e6 to get actual value
-              const notional = exp.positionQty.mul(markPrice).div(new BN(1_000_000));
-              notionalValue = formatAmount(notional);
+            // Calculate unrealized PnL if we have both prices
+            if (!markPrice.isZero() && !entryPrice.isZero() && !exp.positionQty.isZero()) {
+              // unrealized_pnl = position_qty * (mark_price - entry_price) / 1e6
+              const priceDiff = markPrice.sub(entryPrice);
+              const pnl = exp.positionQty.mul(priceDiff).div(new BN(1_000_000));
+              unrealizedPnl = formatAmount(pnl);
             }
           } catch (err) {
             // Fallback to unknown if fetch fails
@@ -215,8 +254,10 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           slabAddress,
           instrumentAddress,
           formatAmount(exp.positionQty),
+          entryPrice.isZero() ? '—' : `$${formatAmount(entryPrice)}`,
           markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
-          notionalValue,
+          unrealizedPnl,
+          realizedPnl,
         ]);
       }
 
