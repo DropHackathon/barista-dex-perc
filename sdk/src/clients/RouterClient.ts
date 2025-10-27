@@ -124,6 +124,36 @@ export class RouterClient {
   }
 
   /**
+   * Derive PositionDetails PDA for a specific position
+   * PDA seeds: ["position", portfolio_pda, slab_index (u16 LE), instrument_index (u16 LE)]
+   * @param portfolioPda Portfolio PDA address
+   * @param slabIndex Slab index in registry (u16)
+   * @param instrumentIndex Instrument index in slab (u16)
+   * @returns [PDA, bump]
+   */
+  derivePositionDetailsPDA(
+    portfolioPda: PublicKey,
+    slabIndex: number,
+    instrumentIndex: number
+  ): [PublicKey, number] {
+    const slabIndexBuffer = Buffer.alloc(2);
+    slabIndexBuffer.writeUInt16LE(slabIndex);
+
+    const instrumentIndexBuffer = Buffer.alloc(2);
+    instrumentIndexBuffer.writeUInt16LE(instrumentIndex);
+
+    return PublicKey.findProgramAddressSync(
+      [
+        Buffer.from('position'),
+        portfolioPda.toBuffer(),
+        slabIndexBuffer,
+        instrumentIndexBuffer,
+      ],
+      this.programId
+    );
+  }
+
+  /**
    * Derive Receipt PDA for a slab fill
    * @param slab Slab market public key
    * @param user User's public key
@@ -1034,7 +1064,7 @@ export class RouterClient {
       ...splitBuffers
     );
 
-    // Build account list (v0.5 layout):
+    // Build account list (v0.5 layout with PositionDetails):
     // 0. user_portfolio (writable)
     // 1. user (signer)
     // 2. dlp_portfolio (writable) - counterparty
@@ -1045,6 +1075,7 @@ export class RouterClient {
     // 7..7+n. slab_accounts (writable)
     // 7+n..7+2n. receipt_accounts (writable)
     // 7+2n..7+3n. oracle_accounts (readonly)
+    // 7+3n..7+4n. position_details_accounts (writable)
 
     // Get slab program ID (needed for CPI and receipt creation)
     const slabAccountInfo = await this.connection.getAccountInfo(splits[0].slabMarket);
@@ -1077,6 +1108,40 @@ export class RouterClient {
     // Add oracle accounts
     for (const split of splits) {
       keys.push({ pubkey: split.oracle, isSigner: false, isWritable: false });
+    }
+
+    // Add PositionDetails accounts (one per split)
+    // For v0.5: We need to derive PositionDetails PDA for each position
+    // The challenge: slab_index depends on registry lookup, which we don't have client-side
+    // Solution: For v0.5 single-slab, fetch registry and lookup slab_index
+    const registry = await this.getRegistry();
+    if (!registry) {
+      throw new Error('Registry not found');
+    }
+    for (const split of splits) {
+      // Find slab index in registry
+      let slabIndex = -1;
+      for (let i = 0; i < registry.slabCount; i++) {
+        if (registry.slabs[i].slabId.equals(split.slabMarket)) {
+          slabIndex = i;
+          break;
+        }
+      }
+
+      // If slab not found, use index 0 (will be auto-registered by router)
+      // The router auto-registers unknown slabs during execution
+      if (slabIndex === -1) {
+        slabIndex = registry.slabCount; // Next available index
+      }
+
+      const instrumentIndex = 0; // v0: single instrument per slab
+      const [positionDetailsPDA] = this.derivePositionDetailsPDA(
+        userPortfolioAddress,
+        slabIndex,
+        instrumentIndex
+      );
+
+      keys.push({ pubkey: positionDetailsPDA, isSigner: false, isWritable: true });
     }
 
     const instruction = new TransactionInstruction({
