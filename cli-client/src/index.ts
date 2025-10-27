@@ -12,13 +12,20 @@ import { slabsCommand } from './commands/discovery/slabs';
 import { slabInfoCommand } from './commands/discovery/slabInfo';
 import { instrumentsCommand } from './commands/discovery/instruments';
 import { priceCommand } from './commands/discovery/price';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+// Read version from package.json
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, '../package.json'), 'utf-8')
+);
 
 const program = new Command();
 
 program
   .name('barista')
   .description('Command-line interface for Barista DEX - Trader CLI (v0)')
-  .version('0.1.0')
+  .version(packageJson.version)
   .addHelpText('after', `
 v0 Limitations:
   • Market orders only - executes instantly at oracle price (±0.5% slippage)
