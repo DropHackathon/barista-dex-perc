@@ -422,8 +422,7 @@ export class RouterClient {
     }
 
     // Get portfolio equity
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const portfolio = await this.getPortfolio(portfolioPDA);
+    const portfolio = await this.getPortfolio(user);
 
     // If portfolio doesn't exist, it will be auto-created with 0 equity
     // Validation will fail (valid = false) but we return the calculation results
@@ -476,8 +475,7 @@ export class RouterClient {
     }
 
     // Get portfolio equity
-    const [portfolioPDA] = this.derivePortfolioPDA(user);
-    const portfolio = await this.getPortfolio(portfolioPDA);
+    const portfolio = await this.getPortfolio(user);
 
     if (!portfolio) {
       // Portfolio doesn't exist yet - return 0 (will be auto-created on first trade)

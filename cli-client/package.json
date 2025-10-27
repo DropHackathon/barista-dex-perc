@@ -1,6 +1,6 @@
 {
   "name": "@barista-dex/cli",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Command-line interface for Barista DEX",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,7 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@barista-dex/sdk": "^0.1.17",
+    "@barista-dex/sdk": "^0.1.19",
     "@solana/spl-token": "^0.3.9",
     "@solana/web3.js": "^1.95.8",
     "bn.js": "^5.2.1",
