@@ -822,7 +822,7 @@ fn create_position_details_pda(
     bump: u8,
 ) -> Result<(), PercolatorError> {
     use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
-    use pinocchio::program::invoke_signed;
+    use pinocchio::program::{invoke_signed, invoke};
 
     // Calculate rent
     let rent = Rent::get().map_err(|_| PercolatorError::InvalidAccount)?;
@@ -841,41 +841,56 @@ fn create_position_details_pda(
         Seed::from(&bump_bytes[..]),
     ];
 
-    // Build System Program CreateAccount instruction
-    // Discriminator: 0 (CreateAccount)
-    let mut instruction_data = [0u8; 52];
-    instruction_data[0..4].copy_from_slice(&0u32.to_le_bytes());
-    instruction_data[4..12].copy_from_slice(&lamports.to_le_bytes());
-    instruction_data[12..20].copy_from_slice(&(POSITION_DETAILS_SIZE as u64).to_le_bytes());
-    instruction_data[20..52].copy_from_slice(program_id.as_ref());
+    // Step 1: Transfer lamports from payer to PDA
+    let mut transfer_data = [0u8; 12];
+    transfer_data[0..4].copy_from_slice(&2u32.to_le_bytes());
+    transfer_data[4..12].copy_from_slice(&lamports.to_le_bytes());
 
-    let create_instruction = Instruction {
+    let transfer_ix = Instruction {
         program_id: system_program.key(),
         accounts: &[
-            AccountMeta {
-                pubkey: payer.key(),
-                is_signer: true,
-                is_writable: true,
-            },
-            AccountMeta {
-                pubkey: position_details_account.key(),
-                is_signer: false,
-                is_writable: true,
-            },
+            AccountMeta::writable_signer(payer.key()),
+            AccountMeta::writable(position_details_account.key()),
         ],
-        data: &instruction_data,
+        data: &transfer_data,
+    };
+
+    invoke(&transfer_ix, &[payer, position_details_account])
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+
+    // Step 2: Allocate space (signed by PDA)
+    let mut allocate_data = [0u8; 12];
+    allocate_data[0..4].copy_from_slice(&8u32.to_le_bytes());
+    allocate_data[4..12].copy_from_slice(&(POSITION_DETAILS_SIZE as u64).to_le_bytes());
+
+    let allocate_ix = Instruction {
+        program_id: system_program.key(),
+        accounts: &[
+            AccountMeta::writable_signer(position_details_account.key()),
+        ],
+        data: &allocate_data,
     };
 
     let signer = Signer::from(&seeds);
-    invoke_signed(
-        &create_instruction,
-        &[payer, position_details_account, system_program],
-        &[signer],
-    )
-    .map_err(|_| {
-        msg!("Error: Failed to create PositionDetails PDA");
-        PercolatorError::InvalidAccount
-    })?;
+    invoke_signed(&allocate_ix, &[position_details_account], &[signer])
+        .map_err(|_| PercolatorError::InvalidAccount)?;
+
+    // Step 3: Assign owner to router program (signed by PDA)
+    let mut assign_data = [0u8; 36];
+    assign_data[0..4].copy_from_slice(&1u32.to_le_bytes());
+    assign_data[4..36].copy_from_slice(program_id.as_ref());
+
+    let assign_ix = Instruction {
+        program_id: system_program.key(),
+        accounts: &[
+            AccountMeta::writable_signer(position_details_account.key()),
+        ],
+        data: &assign_data,
+    };
+
+    let signer = Signer::from(&seeds);
+    invoke_signed(&assign_ix, &[position_details_account], &[signer])
+        .map_err(|_| PercolatorError::InvalidAccount)?;
 
     msg!("PositionDetails PDA created");
     Ok(())
