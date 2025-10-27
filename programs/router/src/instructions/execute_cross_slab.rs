@@ -681,15 +681,15 @@ fn settle_pnl(
         instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
         instruction_data[4..12].copy_from_slice(&profit.to_le_bytes()); // Amount
 
-        use pinocchio::instruction::{AccountMeta, Instruction};
-        use pinocchio::program::invoke;
+        use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
+        use pinocchio::program::invoke_signed;
 
         let transfer_instruction = Instruction {
             program_id: system_program.key(),
             accounts: &[
                 AccountMeta {
                     pubkey: dlp_portfolio_account.key(),
-                    is_signer: false,
+                    is_signer: true, // DLP portfolio signs via PDA
                     is_writable: true,
                 },
                 AccountMeta {
@@ -701,9 +701,21 @@ fn settle_pnl(
             data: &instruction_data,
         };
 
-        invoke(
+        // Sign with DLP portfolio PDA seeds
+        let dlp_owner = dlp_portfolio.user;
+        let dlp_bump = dlp_portfolio.bump;
+        let bump_bytes = [dlp_bump];
+        let seeds = [
+            Seed::from(b"portfolio" as &[u8]),
+            Seed::from(dlp_owner.as_ref()),
+            Seed::from(&bump_bytes[..]),
+        ];
+        let signer = Signer::from(&seeds);
+
+        invoke_signed(
             &transfer_instruction,
             &[dlp_portfolio_account, user_portfolio_account, system_program],
+            &[signer],
         )
         .map_err(|_| PercolatorError::InsufficientFunds)?;
 
@@ -723,15 +735,15 @@ fn settle_pnl(
         instruction_data[0..4].copy_from_slice(&2u32.to_le_bytes()); // Transfer discriminator
         instruction_data[4..12].copy_from_slice(&loss.to_le_bytes()); // Amount
 
-        use pinocchio::instruction::{AccountMeta, Instruction};
-        use pinocchio::program::invoke;
+        use pinocchio::instruction::{AccountMeta, Instruction, Seed, Signer};
+        use pinocchio::program::invoke_signed;
 
         let transfer_instruction = Instruction {
             program_id: system_program.key(),
             accounts: &[
                 AccountMeta {
                     pubkey: user_portfolio_account.key(),
-                    is_signer: false,
+                    is_signer: true, // User portfolio signs via PDA
                     is_writable: true,
                 },
                 AccountMeta {
@@ -743,9 +755,21 @@ fn settle_pnl(
             data: &instruction_data,
         };
 
-        invoke(
+        // Sign with user portfolio PDA seeds
+        let user_owner = user_portfolio.user;
+        let user_bump = user_portfolio.bump;
+        let bump_bytes = [user_bump];
+        let seeds = [
+            Seed::from(b"portfolio" as &[u8]),
+            Seed::from(user_owner.as_ref()),
+            Seed::from(&bump_bytes[..]),
+        ];
+        let signer = Signer::from(&seeds);
+
+        invoke_signed(
             &transfer_instruction,
             &[user_portfolio_account, dlp_portfolio_account, system_program],
+            &[signer],
         )
         .map_err(|_| PercolatorError::InsufficientFunds)?;
 
