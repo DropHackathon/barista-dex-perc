@@ -258,6 +258,7 @@ pub fn process_liquidate_user(
         empty_position_details, // TODO: Add proper position details support
         plan.get_splits(),
         1, // Limit order (liquidations execute at specific prices)
+        10, // Use max leverage (10x) for liquidations to ensure sufficient margin calculation
         &dummy_program_id, // TODO: Pass actual program_id
     )?;
     msg!("Liquidate: Execution complete via cross-slab logic");

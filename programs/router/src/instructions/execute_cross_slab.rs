@@ -153,6 +153,7 @@ pub fn process_execute_cross_slab(
     position_details_accounts: &[AccountInfo],
     splits: &[SlabSplit],
     order_type: u8, // 0 = Market, 1 = Limit
+    leverage: u8, // 1-10x leverage
     program_id: &Pubkey,
 ) -> Result<(), PercolatorError> {
     // Verify user portfolio belongs to user
@@ -480,6 +481,27 @@ pub fn process_execute_cross_slab(
                 .map(|clock| clock.unix_timestamp)
                 .unwrap_or(0);
             position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp);
+
+            // Transfer collateral margin upfront from user to DLP
+            // 1 contract = 1 SOL = 1e9 lamports
+            // quantity is in 1e6 scale (e.g., 25,270,000 = 25.27 contracts)
+            // Margin = (contracts × 1e9 lamports) / leverage
+            let quantity_abs = filled_qty.abs() as u128;
+            let leverage_u128 = leverage as u128;
+
+            // Calculate margin in lamports: (qty in 1e6 × 1000) / leverage
+            // Example: 25.27 contracts at 5x = (25,270,000 × 1000) / 5 = 5,054,000,000 lamports = 5.054 SOL
+            let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
+
+            // Transfer margin from user to DLP
+            transfer_collateral_margin(
+                user_portfolio_account,
+                user_portfolio,
+                dlp_portfolio_account,
+                dlp_portfolio,
+                margin_lamports,
+            )?;
+
             0i128 // No realized PnL when adding
         } else {
             // Reducing position (opposite direction)
@@ -552,7 +574,7 @@ pub fn process_execute_cross_slab(
     // - Calculate net exposure across all slabs for same instrument
     // - IM = abs(net_exposure) * notional_value * imr_factor
     let net_exposure = calculate_net_exposure(user_portfolio);
-    let im_required = calculate_initial_margin(net_exposure, splits);
+    let im_required = calculate_initial_margin(net_exposure, splits, leverage);
 
     msg!("Calculated margin on net exposure");
 
@@ -579,19 +601,39 @@ fn calculate_net_exposure(portfolio: &Portfolio) -> i64 {
     net
 }
 
-/// Calculate initial margin requirement (v0 simplified)
-fn calculate_initial_margin(net_exposure: i64, splits: &[SlabSplit]) -> u128 {
-    // For v0, simplified: IM = abs(net_exposure) * avg_price * 0.1 (10% IMR)
+/// Calculate initial margin requirement based on actual leverage
+/// For 1x (spot): minimal margin (~0.1% of notional)
+/// For 10x (max): 10% of notional
+/// Formula: IM = abs(net_exposure) * price * leverage / (max_leverage * 1e6)
+fn calculate_initial_margin(net_exposure: i64, splits: &[SlabSplit], leverage: u8) -> u128 {
     if splits.is_empty() {
         return 0;
     }
 
+    const MAX_LEVERAGE: u128 = 10;
     let abs_exposure = net_exposure.abs() as u128;
     let avg_price = splits[0].limit_px as u128; // Use first split price
+    let leverage_u128 = leverage as u128;
 
-    // IM = abs(net_exposure) * price * 0.1 / 1e6 (scale factor)
+    msg!("DEBUG: calculate_initial_margin called");
+    if leverage == 1 {
+        msg!("DEBUG: Using 1x leverage");
+    } else if leverage == 10 {
+        msg!("DEBUG: Using 10x leverage");
+    }
+
+    // IM = (exposure * price) / (leverage * 1e12)
+    // This implements: IM = notional_value / leverage (standard IMR formula)
+    // Note: exposure and price are both in 1e6 scale, so exposure * price = 1e12
+    // We divide by (leverage * 1e12) to convert to lamports and apply leverage ratio
+    // Examples (with 1 contract ≈ $0.20 = 200,000 lamports):
+    // - 1x: IM = (1M * 200M) / (1 * 1e12) = 200K lamports = 0.0002 SOL (100% collateral)
+    // - 5x: IM = (1M * 200M) / (5 * 1e12) = 40K lamports = 0.00004 SOL (20% collateral)
+    // - 10x: IM = (1M * 200M) / (10 * 1e12) = 20K lamports = 0.00002 SOL (10% collateral)
     // For v0 proof: if net_exposure = 0, IM = 0!
-    (abs_exposure * avg_price * 10) / (100 * 1_000_000)
+    let im_result = (abs_exposure * avg_price) / (leverage_u128 * 1_000_000_000_000);
+    msg!("DEBUG: IM calculation complete");
+    im_result
 }
 
 /// Calculate realized PnL from a fill
@@ -701,6 +743,45 @@ fn settle_pnl(
         msg!("User loss transferred to DLP portfolio");
     }
 
+    Ok(())
+}
+
+/// Transfer collateral margin from user to DLP when opening/increasing position
+fn transfer_collateral_margin(
+    user_portfolio_account: &AccountInfo,
+    user_portfolio: &mut Portfolio,
+    dlp_portfolio_account: &AccountInfo,
+    dlp_portfolio: &mut Portfolio,
+    margin_lamports: u128,
+) -> Result<(), PercolatorError> {
+    if margin_lamports == 0 {
+        return Ok(());
+    }
+
+    let margin = margin_lamports as u64;
+
+    // Check user has sufficient lamports
+    if user_portfolio_account.lamports() < margin {
+        msg!("Error: User portfolio insufficient SOL for margin");
+        return Err(PercolatorError::InsufficientFunds);
+    }
+
+    // Transfer SOL from user to DLP (direct lamport manipulation)
+    *user_portfolio_account.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InsufficientFunds)? -= margin;
+    *dlp_portfolio_account.try_borrow_mut_lamports()
+        .map_err(|_| PercolatorError::InsufficientFunds)? += margin;
+
+    // Update equity tracking
+    let margin_i128 = margin as i128;
+    user_portfolio.equity = user_portfolio.equity.saturating_sub(margin_i128);
+    dlp_portfolio.equity = dlp_portfolio.equity.saturating_add(margin_i128);
+
+    // Update principal tracking (user deposited, DLP received)
+    user_portfolio.principal = user_portfolio.principal.saturating_sub(margin_i128);
+    dlp_portfolio.principal = dlp_portfolio.principal.saturating_add(margin_i128);
+
+    msg!("Collateral margin transferred to DLP");
     Ok(())
 }
 

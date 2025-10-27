@@ -262,12 +262,13 @@ fn process_initialize_portfolio_inner(program_id: &Pubkey, accounts: &[AccountIn
 /// Instruction data layout:
 /// - num_splits: u8 (1 byte)
 /// - order_type: u8 (0 = market, 1 = limit)
+/// - leverage: u8 (1-10x leverage)
 /// - For each split (17 bytes):
 ///   - side: u8 (0 = buy, 1 = sell)
 ///   - qty: i64 (quantity in 1e6 scale)
 ///   - limit_px: i64 (limit price in 1e6 scale)
 ///
-/// Total size: 2 + (17 * num_splits) bytes
+/// Total size: 3 + (17 * num_splits) bytes
 /// Maximum splits: 8 (to avoid stack overflow, v0.5: only 1 slab supported)
 fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     if accounts.len() < 7 {
@@ -306,6 +307,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
     let mut reader = InstructionReader::new(data);
     let num_splits = reader.read_u8()? as usize;
     let order_type = reader.read_u8()?;
+    let leverage = reader.read_u8()?;
 
     if num_splits == 0 {
         msg!("Error: num_splits must be > 0");
@@ -315,6 +317,22 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
     if order_type > 1 {
         msg!("Error: Invalid order_type");
         return Err(PercolatorError::InvalidOrderType.into());
+    }
+
+    if leverage < 1 || leverage > 10 {
+        msg!("Error: Invalid leverage (must be 1-10)");
+        return Err(PercolatorError::InvalidInstruction.into());
+    }
+
+    // Log leverage value (msg! doesn't support format args in pinocchio)
+    if leverage == 1 {
+        msg!("DEBUG: Leverage = 1x");
+    } else if leverage == 5 {
+        msg!("DEBUG: Leverage = 5x");
+    } else if leverage == 10 {
+        msg!("DEBUG: Leverage = 10x");
+    } else {
+        msg!("DEBUG: Leverage = other");
     }
 
     // Verify we have enough accounts: 7 base + num_splits slabs + num_splits receipts + num_splits oracles + num_splits position_details
@@ -387,6 +405,7 @@ fn process_execute_cross_slab_inner(program_id: &Pubkey, accounts: &[AccountInfo
         position_details_accounts,
         splits,
         order_type,
+        leverage,
         program_id,
     )?;
 
