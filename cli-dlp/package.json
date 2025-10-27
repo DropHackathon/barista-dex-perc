@@ -1,6 +1,6 @@
 {
   "name": "@barista-dex/cli-dlp",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "CLI for Barista DEX Liquidity Providers (DLPs)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
