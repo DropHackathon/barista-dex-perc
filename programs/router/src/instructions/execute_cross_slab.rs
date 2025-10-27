@@ -458,11 +458,8 @@ pub fn process_execute_cross_slab(
                     .map(|clock| clock.unix_timestamp)
                     .unwrap_or(0);
 
-                // Calculate margin for this new position
-                let quantity_abs = filled_qty.abs() as u128;
-                let leverage_u128 = leverage as u128;
-                let initial_margin = (quantity_abs * 1_000) / leverage_u128;
-
+                // Initialize new PositionDetails with zero margin
+                // Margin will be calculated and added in the "adding to position" logic below
                 PositionDetails::new(
                     *user_portfolio_account.key(),
                     slab_idx,
@@ -471,8 +468,8 @@ pub fn process_execute_cross_slab(
                     filled_qty,   // initial quantity
                     timestamp,
                     bump,
-                    initial_margin, // margin held in DLP
-                    leverage,       // leverage (1-10x)
+                    0,            // margin_held starts at 0, will be added below
+                    leverage,     // leverage (1-10x)
                 )
             }
         };
@@ -481,29 +478,21 @@ pub fn process_execute_cross_slab(
         let is_buy = split.side == 0;
         let same_direction = (is_buy && current_exposure >= 0) || (!is_buy && current_exposure <= 0);
 
+        use pinocchio::sysvars::{clock::Clock, Sysvar};
+        let timestamp = Clock::get()
+            .map(|clock| clock.unix_timestamp)
+            .unwrap_or(0);
+
         let realized_pnl = if same_direction || current_exposure == 0 {
-            // Adding to position or opening new position
+            // Case 1: Adding to position or opening new position (leverage applies)
             msg!("Adding to position");
 
-            // Calculate margin for this trade
-            // 1 contract = 1 SOL = 1e9 lamports
-            // quantity is in 1e6 scale (e.g., 25,270,000 = 25.27 contracts)
-            // Margin = (contracts × 1e9 lamports) / leverage
             let quantity_abs = filled_qty.abs() as u128;
             let leverage_u128 = leverage as u128;
-
-            // Calculate margin in lamports: (qty in 1e6 × 1000) / leverage
-            // Example: 25.27 contracts at 5x = (25,270,000 × 1000) / 5 = 5,054,000,000 lamports = 5.054 SOL
             let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
 
-            // Update position details with new trade + margin
-            use pinocchio::sysvars::{clock::Clock, Sysvar};
-            let timestamp = Clock::get()
-                .map(|clock| clock.unix_timestamp)
-                .unwrap_or(0);
             position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp, margin_lamports);
 
-            // Transfer margin from user to DLP
             transfer_collateral_margin(
                 user_portfolio_account,
                 user_portfolio,
@@ -514,36 +503,138 @@ pub fn process_execute_cross_slab(
 
             0i128 // No realized PnL when adding
         } else {
-            // Reducing position (opposite direction)
-            msg!("Reducing position");
-            use pinocchio::sysvars::{clock::Clock, Sysvar};
-            let timestamp = Clock::get()
-                .map(|clock| clock.unix_timestamp)
-                .unwrap_or(0);
-            let (pnl, new_qty, margin_to_release) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+            // Case 2 & 3: Opposite direction - reducing or reversing position
+            // Check if this is a position reversal (filled_qty exceeds current_exposure)
+            let current_abs = current_exposure.abs();
+            let filled_abs = filled_qty.abs();
 
-            // Return margin collateral from DLP to user
-            if margin_to_release > 0 {
-                msg!("Returning margin to user");
-                return_margin_to_user(
+            if filled_abs <= current_abs {
+                // Case 2: Partial or full close (leverage is IGNORED)
+                msg!("Reducing/closing position");
+
+                let (pnl, new_qty, margin_to_release) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+
+                // Return margin collateral from DLP to user
+                if margin_to_release > 0 {
+                    msg!("Returning margin to user");
+                    return_margin_to_user(
+                        user_portfolio_account,
+                        user_portfolio,
+                        dlp_portfolio_account,
+                        dlp_portfolio,
+                        margin_to_release,
+                    )?;
+                }
+
+                // Check if position is fully closed
+                if new_qty == 0 {
+                    msg!("Position fully closed, closing PDA");
+                    close_position_details_pda(position_details_account, user_account)?;
+                } else {
+                    // Partial close - save updated PositionDetails
+                    save_position_details(position_details_account, &position_details)?;
+                }
+
+                pnl
+            } else {
+                // Case 3: Position reversal - close existing, open new in opposite direction
+                msg!("Position reversal: closing existing and opening opposite");
+
+                // Step 1: Close the entire existing position
+                let close_qty = if current_exposure > 0 { -current_abs } else { current_abs };
+                let (pnl, _, margin_to_release) = position_details.reduce_position(vwap_px, close_qty, 0i128, timestamp);
+
+                // Return all margin from closed position
+                if margin_to_release > 0 {
+                    msg!("Returning margin from closed position");
+                    return_margin_to_user(
+                        user_portfolio_account,
+                        user_portfolio,
+                        dlp_portfolio_account,
+                        dlp_portfolio,
+                        margin_to_release,
+                    )?;
+                }
+
+                // Close the old PositionDetails PDA (position fully closed)
+                msg!("Closing old position PDA");
+                close_position_details_pda(position_details_account, user_account)?;
+
+                // Step 2: Open new position in opposite direction with remaining quantity
+                let remaining_qty_abs = filled_abs - current_abs;
+                let new_qty = if is_buy { remaining_qty_abs as i64 } else { -(remaining_qty_abs as i64) };
+
+                msg!("Opening new position in opposite direction");
+
+                // Create new PositionDetails PDA for the reversed position
+                use pinocchio::pubkey::find_program_address;
+                let slab_idx_bytes = slab_idx.to_le_bytes();
+                let instrument_idx_bytes = instrument_idx.to_le_bytes();
+                let seeds: &[&[u8]] = &[
+                    b"position",
+                    user_portfolio_account.key().as_ref(),
+                    &slab_idx_bytes,
+                    &instrument_idx_bytes,
+                ];
+                let (expected_pda, bump) = find_program_address(seeds, program_id);
+
+                // Verify PDA matches
+                if position_details_account.key() != &expected_pda {
+                    msg!("Error: PositionDetails PDA mismatch on reversal");
+                    return Err(PercolatorError::InvalidAccount);
+                }
+
+                // Recreate the PDA for the new position
+                create_position_details_pda(
+                    position_details_account,
+                    user_portfolio_account.key(),
+                    slab_idx,
+                    instrument_idx,
+                    user_account,
+                    system_program,
+                    program_id,
+                    bump,
+                )?;
+
+                // Initialize new position with margin based on leverage
+                let leverage_u128 = leverage as u128;
+                let remaining_qty_u128 = remaining_qty_abs as u128;
+                let new_margin = (remaining_qty_u128 * 1_000) / leverage_u128;
+
+                let new_position = PositionDetails::new(
+                    *user_portfolio_account.key(),
+                    slab_idx,
+                    instrument_idx,
+                    vwap_px,
+                    new_qty,
+                    timestamp,
+                    bump,
+                    0,  // margin_held starts at 0, will be added below
+                    leverage,
+                );
+
+                // Save the new position
+                save_position_details(position_details_account, &new_position)?;
+
+                // Now add margin for the new position (this will be the only margin held)
+                let mut updated_position = new_position;
+                updated_position.add_to_position(vwap_px, new_qty, 0i128, timestamp, new_margin);
+                save_position_details(position_details_account, &updated_position)?;
+
+                // Transfer new margin from user to DLP
+                transfer_collateral_margin(
                     user_portfolio_account,
                     user_portfolio,
                     dlp_portfolio_account,
                     dlp_portfolio,
-                    margin_to_release,
+                    new_margin,
                 )?;
-            }
 
-            // Check if position is fully closed
-            if new_qty == 0 {
-                msg!("Position closed, closing PDA");
-                close_position_details_pda(position_details_account, user_account)?;
-            } else {
-                // Save updated PositionDetails
-                save_position_details(position_details_account, &position_details)?;
-            }
+                // Update position_details reference for later use
+                position_details = updated_position;
 
-            pnl
+                pnl // Return PnL from closed portion
+            }
         };
 
         // If not closed, save PositionDetails (for add_to_position case or partial reduce)
@@ -591,14 +682,11 @@ pub fn process_execute_cross_slab(
         }
     }
 
-    // Phase 4: Calculate IM on net exposure (THE CAPITAL EFFICIENCY PROOF!)
-    // For v0, use simplified margin calculation:
-    // - Calculate net exposure across all slabs for same instrument
-    // - IM = abs(net_exposure) * notional_value * imr_factor
-    let net_exposure = calculate_net_exposure(user_portfolio);
-    let im_required = calculate_initial_margin(net_exposure, splits, leverage);
+    // Phase 4: Calculate IM by summing margin_held from all PositionDetails
+    // IM = sum of all margin_held across positions (actual collateral committed)
+    let im_required = calculate_portfolio_margin(user_portfolio_account, position_details_accounts, program_id)?;
 
-    msg!("Calculated margin on net exposure");
+    msg!("Calculated total margin from positions");
 
     user_portfolio.update_margin(im_required, im_required / 2); // MM = IM / 2 for v0
 
@@ -656,6 +744,75 @@ fn calculate_initial_margin(net_exposure: i64, splits: &[SlabSplit], leverage: u
     let im_result = (abs_exposure * avg_price) / (leverage_u128 * 1_000_000_000_000);
     msg!("DEBUG: IM calculation complete");
     im_result
+}
+
+/// Calculate total portfolio margin by summing margin_held from all PositionDetails
+/// Returns: Total IM in lamports (u128)
+fn calculate_portfolio_margin(
+    portfolio_account: &AccountInfo,
+    position_details_accounts: &[AccountInfo],
+    program_id: &Pubkey,
+) -> Result<u128, PercolatorError> {
+    let mut total_margin: u128 = 0;
+
+    // Iterate through all PositionDetails accounts
+    for pd_account in position_details_accounts {
+        // Skip if account is not owned by router program
+        if pd_account.owner() != program_id {
+            continue;
+        }
+
+        // Skip if account has no data (not initialized)
+        if pd_account.data_len() == 0 {
+            continue;
+        }
+
+        // Verify this PositionDetails belongs to the user's portfolio
+        let data = pd_account.try_borrow_data()
+            .map_err(|_| PercolatorError::InvalidAccount)?;
+
+        // Check size
+        if data.len() < POSITION_DETAILS_SIZE {
+            continue;
+        }
+
+        // Read portfolio pubkey (offset 8, after magic)
+        let pd_portfolio_start = 8;
+        let pd_portfolio_end = pd_portfolio_start + 32;
+        let pd_portfolio_bytes = &data[pd_portfolio_start..pd_portfolio_end];
+
+        // Verify this position belongs to the user's portfolio
+        if pd_portfolio_bytes != portfolio_account.key().as_ref() {
+            continue;
+        }
+
+        // Read margin_held (u128 at offset 112)
+        let margin_offset = 112;
+        if data.len() < margin_offset + 16 {
+            continue;
+        }
+
+        // Read u128 little-endian
+        let margin_bytes = &data[margin_offset..margin_offset + 16];
+        let margin_low = u64::from_le_bytes([
+            margin_bytes[0], margin_bytes[1], margin_bytes[2], margin_bytes[3],
+            margin_bytes[4], margin_bytes[5], margin_bytes[6], margin_bytes[7],
+        ]) as u128;
+        let margin_high = u64::from_le_bytes([
+            margin_bytes[8], margin_bytes[9], margin_bytes[10], margin_bytes[11],
+            margin_bytes[12], margin_bytes[13], margin_bytes[14], margin_bytes[15],
+        ]) as u128;
+        let margin_held = margin_low | (margin_high << 64);
+
+        // Skip closed positions (margin_held == 0)
+        if margin_held == 0 {
+            continue;
+        }
+
+        total_margin = total_margin.saturating_add(margin_held);
+    }
+
+    Ok(total_margin)
 }
 
 /// Calculate realized PnL from a fill
