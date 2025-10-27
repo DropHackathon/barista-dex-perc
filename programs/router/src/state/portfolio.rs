@@ -76,7 +76,7 @@ impl Portfolio {
 
     // Compile-time size check - will cause build to fail if size doesn't match
     const _SIZE_CHECK: () = {
-        const EXPECTED: usize = 12176; // Updated from 135056 after reducing MAX_SLABS from 256 to 16
+        const EXPECTED: usize = 12592; // Updated from 12176 (LpBucket size changed)
         const ACTUAL: usize = core::mem::size_of::<Portfolio>();
         const _: [(); ACTUAL] = [(); EXPECTED];
     };
