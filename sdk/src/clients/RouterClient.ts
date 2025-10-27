@@ -8,6 +8,7 @@ import {
 } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
+import bs58 from 'bs58';
 import {
   RouterInstruction,
   Portfolio,
@@ -28,6 +29,7 @@ import {
 import {
   SlabInfo,
 } from '../types/discovery';
+import { SLAB_SIZE } from '../constants';
 import {
   QuoteLevel,
   QuoteCache,
@@ -247,10 +249,16 @@ export class RouterClient {
    */
   async getAllSlabs(slabProgramId: PublicKey): Promise<SlabInfo[]> {
     // Get all accounts owned by the slab program
+    // Filter by magic bytes "PERP10\0\0" at offset 0 to identify slab accounts
+    // This is more robust than dataSize filtering - works even if slab size changes
+    const magicBytes = Buffer.from('PERP10\0\0', 'utf-8');
     const accounts = await this.connection.getProgramAccounts(slabProgramId, {
       filters: [
         {
-          dataSize: 4096, // Approximate size of SlabState in v0 (~4KB)
+          memcmp: {
+            offset: 0,
+            bytes: bs58.encode(magicBytes), // Solana RPC expects base58 encoding
+          },
         },
       ],
     });
