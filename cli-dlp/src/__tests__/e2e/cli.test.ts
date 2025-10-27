@@ -62,7 +62,7 @@ describe('CLI E2E Tests', () => {
     it('should show version with --version', async () => {
       const { stdout } = await execAsync('npm run barista-dlp -- --version');
 
-      expect(stdout).toContain('0.1.26');
+      expect(stdout).toContain('0.1.27');
     });
 
     it('should show welcome message with no args', async () => {

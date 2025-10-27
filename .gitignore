@@ -86,3 +86,4 @@ scripts/
 # Build artifacts
 target/
 test-ledger/
+test-ledger/

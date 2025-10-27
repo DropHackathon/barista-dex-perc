@@ -309,11 +309,11 @@ barista-dlp portfolio
 ### 4.4: Create Instrument (Market Identifier)
 
 ```bash
-# Generate a keypair for BTC-PERP instrument
-solana-keygen new --no-bip39-passphrase --outfile ./btc-perp-instrument.json
+# Generate a keypair for SOL-PERP instrument
+solana-keygen new --no-bip39-passphrase --outfile ./sol-perp-instrument.json
 
 # Get the instrument ID
-solana-keygen pubkey ./btc-perp-instrument.json
+solana-keygen pubkey ./sol-perp-instrument.json
 # Save this: <INSTRUMENT_ID>
 ```
 
