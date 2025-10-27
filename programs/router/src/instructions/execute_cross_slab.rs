@@ -366,10 +366,41 @@ pub fn process_execute_cross_slab(
         let filled_qty = receipt.filled_qty;
         let vwap_px = receipt.vwap_px;
 
-        // Update portfolio exposure for this slab/instrument
-        // For v0, we'll use slab index and instrument 0 (simplified)
-        let slab_idx = i as u16;
-        let instrument_idx = 0u16;
+        // Get slab account pubkey
+        let slab_account = &slab_accounts[i];
+        let slab_id = slab_account.key();
+
+        msg!("Looking up slab in registry");
+        // Auto-register slab in registry if not already registered
+        // This ensures indices are stable and positions can be resolved
+        let slab_idx = match registry.find_slab(slab_id) {
+            Some((idx, _)) => {
+                msg!("Slab found in registry");
+                idx
+            }
+            None => {
+                msg!("Slab NOT found, auto-registering");
+                // Auto-register new slab with default parameters
+                // In production, slabs should be pre-registered by governance
+                let oracle_id = *oracle_accounts[i].key();
+                registry
+                    .register_slab(
+                        *slab_id,
+                        [0; 32],      // version_hash (placeholder for auto-registration)
+                        oracle_id,
+                        1000,         // imr: 10% (1000 bps)
+                        500,          // mmr: 5% (500 bps)
+                        10,           // maker_fee_cap: 0.1% (10 bps)
+                        10,           // taker_fee_cap: 0.1% (10 bps)
+                        1000,         // latency_sla_ms: 1 second
+                        u128::MAX,    // max_exposure: no limit
+                        0,            // current_ts (placeholder)
+                    )
+                    .map_err(|_| PercolatorError::InvalidAccount)?
+            }
+        };
+
+        let instrument_idx = 0u16; // v0: single instrument per slab
 
         // Get current exposure
         let current_exposure = user_portfolio.get_exposure(slab_idx, instrument_idx);

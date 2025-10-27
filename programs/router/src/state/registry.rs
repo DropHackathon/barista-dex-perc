@@ -202,11 +202,16 @@ impl SlabRegistry {
         max_exposure: u128,
         current_ts: u64,
     ) -> Result<u16, ()> {
+        use pinocchio::msg;
+
         if (self.slab_count as usize) >= MAX_SLABS {
+            msg!("Error: MAX_SLABS limit reached");
             return Err(());
         }
 
         let idx = self.slab_count;
+        msg!("Registry: Registering slab");
+
         self.slabs[idx as usize] = SlabEntry {
             slab_id,
             version_hash,
@@ -223,16 +228,32 @@ impl SlabRegistry {
         };
         self.slab_count += 1;
 
+        msg!("Registry: Slab registered successfully");
+
         Ok(idx)
     }
 
     /// Find slab by ID
     pub fn find_slab(&self, slab_id: &Pubkey) -> Option<(u16, &SlabEntry)> {
+        use pinocchio::msg;
+
+        msg!("find_slab: searching registry");
+        msg!("find_slab: slab_count");
         for i in 0..self.slab_count as usize {
-            if &self.slabs[i].slab_id == slab_id && self.slabs[i].active {
-                return Some((i as u16, &self.slabs[i]));
+            msg!("find_slab: checking entry");
+            let entry_active = self.slabs[i].active;
+            msg!("find_slab: active check");
+            if &self.slabs[i].slab_id == slab_id {
+                msg!("find_slab: ID matches!");
+                if entry_active {
+                    msg!("find_slab: entry is active, returning");
+                    return Some((i as u16, &self.slabs[i]));
+                } else {
+                    msg!("find_slab: entry is INACTIVE, skipping");
+                }
             }
         }
+        msg!("find_slab: not found");
         None
     }
 
