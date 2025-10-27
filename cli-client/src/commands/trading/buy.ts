@@ -23,19 +23,37 @@ interface BuyOptions {
 }
 
 /**
- * Parse leverage string to number
- * @param leverageStr "5x", "10x", or just "5", "10"
- * @returns Leverage as number (1-10)
+ * Parse and round leverage input
+ * @param leverageStr Plain number like "5", "5.5", or with "x" suffix like "5x"
+ * @returns Leverage rounded to nearest tenth (1 decimal place), between 1-10
  */
 function parseLeverage(leverageStr: string): number {
+  // Remove optional "x" suffix and parse
   const cleaned = leverageStr.toLowerCase().replace('x', '').trim();
   const leverage = parseFloat(cleaned);
 
   if (isNaN(leverage) || leverage < 1 || leverage > 10) {
-    throw new Error('Leverage must be between 1x and 10x');
+    throw new Error('Leverage must be between 1 and 10');
   }
 
-  return leverage;
+  // Round to nearest tenth (1 decimal place)
+  return Math.round(leverage * 10) / 10;
+}
+
+/**
+ * Parse and round quantity input
+ * @param quantityStr Quantity as string
+ * @returns Quantity rounded to nearest hundredth (2 decimal places)
+ */
+function parseQuantity(quantityStr: string): number {
+  const quantity = parseFloat(quantityStr);
+
+  if (isNaN(quantity) || quantity <= 0) {
+    throw new Error('Quantity must be a positive number');
+  }
+
+  // Round to nearest hundredth (2 decimal places)
+  return Math.round(quantity * 100) / 100;
 }
 
 export async function buyCommand(options: BuyOptions): Promise<void> {
@@ -85,8 +103,9 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       wallet
     );
 
-    // Parse quantity as decimal (e.g., "1.5" -> 1500000 with 6 decimals)
-    const quantityInput = parseAmount(options.quantity, DECIMALS);
+    // Parse and round quantity (e.g., "1.567" -> 1.57), then convert to 1e6 scale
+    const roundedQuantity = parseQuantity(options.quantity);
+    const quantityInput = parseAmount(roundedQuantity.toString(), DECIMALS);
     let slabMarket: PublicKey;
     let price: BN;
 
@@ -120,11 +139,37 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       // ============ MANUAL SLAB MODE (existing) ============
       slabMarket = new PublicKey(options.slab!);
 
-      // Get price (either from user or fetch market price)
+      // Get price (either from user or from oracle for market orders)
       if (isMarketOrder) {
-        spinner.text = 'Fetching market price...';
-        price = await client.getMarketPrice(slabMarket, config.slabProgramId);
-        console.log(chalk.gray(`  Market price: ${price.toString()}`));
+        spinner.text = 'Fetching oracle price...';
+
+        // For market orders, use oracle price for accurate margin calculations
+        const oracleAccount = options.oracle
+          ? new PublicKey(options.oracle)
+          : await client.getOracleForSlab(slabMarket);
+
+        if (oracleAccount) {
+          const oracleAccountInfo = await connection.getAccountInfo(oracleAccount);
+          if (oracleAccountInfo) {
+            const priceData = oracleAccountInfo.data;
+            if (priceData.length === 128) {
+              // Percolator oracle format (offset 80)
+              price = new BN(priceData.readBigInt64LE(80).toString());
+            } else if (priceData.length >= 216) {
+              // Pyth oracle format (offset 208)
+              price = new BN(priceData.readBigInt64LE(208).toString());
+            } else {
+              throw new Error(`Invalid oracle data length: ${priceData.length}`);
+            }
+            console.log(chalk.gray(`  Oracle price: ${price.toString()}`));
+          } else {
+            throw new Error('Oracle account not found');
+          }
+        } else {
+          // Fallback to mark price if no oracle
+          price = await client.getMarketPrice(slabMarket, config.slabProgramId);
+          console.log(chalk.gray(`  Market price (mark): ${price.toString()}`));
+        }
       } else {
         // Parse price as decimal (e.g., "50000.50" -> 50000500000 with 6 decimals)
         price = parseAmount(options.price!, DECIMALS);
@@ -173,7 +218,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     console.log(chalk.gray(`    Quantity input: ${formatAmount(quantityInput, DECIMALS)} units`));
     console.log(chalk.gray(`    Price: $${formatAmount(price, DECIMALS)}`));
     console.log(chalk.gray(`    Margin committed: ${formatAmount(validation.marginCommitted, DECIMALS)} units`));
-    console.log(chalk.cyan(`    → Actual position: ${formatAmount(validation.positionSize, DECIMALS)} units (${formatAmount(validation.actualQuantity, DECIMALS)} contracts)`));
+    console.log(chalk.cyan(`    → Actual position: ${formatAmount(validation.actualQuantity, DECIMALS)} units (${formatAmount(validation.actualQuantity, DECIMALS)} contracts)`));
+    console.log(chalk.cyan(`    → Position size: $${formatAmount(validation.positionSize, DECIMALS)}`));
     console.log(chalk.gray(`    Available equity: ${formatAmount(validation.availableEquity, DECIMALS)} units`));
 
     // Show order type info
@@ -247,7 +293,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
       validation.actualQuantity,  // Use leveraged quantity!
       price,
       oraclePublicKey,  // Oracle from CLI or auto-fetched from SlabRegistry
-      orderType   // Market order if no price provided, Limit if price specified
+      orderType,   // Market order if no price provided, Limit if price specified
+      leverage    // Pass leverage to SDK (1-10x)
     );
 
     spinner.text = 'Creating transaction...';
@@ -279,8 +326,8 @@ export async function buyCommand(options: BuyOptions): Promise<void> {
     console.log(chalk.gray(`  Signature: ${signature}`));
     console.log(chalk.gray(`  Explorer: ${getExplorerUrl(signature, options.network || 'mainnet-beta')}`));
     console.log();
-    console.log(chalk.cyan(`  Position opened: ${validation.actualQuantity.toString()} contracts`));
-    console.log(chalk.cyan(`  Margin used: ${validation.marginCommitted.toString()} units`));
+    console.log(chalk.cyan(`  Position opened: ${formatAmount(validation.actualQuantity, DECIMALS)} contracts`));
+    console.log(chalk.cyan(`  Margin used: ${formatAmount(validation.marginCommitted, DECIMALS)} units`));
     console.log(chalk.cyan(`  Effective leverage: ${leverage}x`));
   } catch (error: any) {
     spinner.fail();
