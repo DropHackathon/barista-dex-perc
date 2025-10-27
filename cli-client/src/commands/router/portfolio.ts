@@ -5,6 +5,7 @@ import { displayError, formatAmount, formatSol, formatPublicKey } from '../../ut
 import chalk from 'chalk';
 import ora from 'ora';
 import Table from 'cli-table3';
+import boxen from 'boxen';
 import BN from 'bn.js';
 
 interface PortfolioOptions {
@@ -70,54 +71,54 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
 
     spinner.succeed('Portfolio loaded');
 
-    // Display portfolio summary
-    console.log(chalk.bold('\n📊 Portfolio Summary\n'));
+    // Display portfolio summary with cleaner layout
+    console.log('');
 
-    const summaryTable = new Table({
-      head: ['Metric', 'Value'],
-      colWidths: [30, 35],
-    });
+    // Main balance box
+    const equity = formatSol(portfolio.equity);
+    const freeCollateral = formatSol(portfolio.freeCollateral);
+    const pnl = formatSol(portfolio.pnl);
+    const im = formatSol(portfolio.im);
 
-    summaryTable.push(
-      ['User', formatPublicKey(portfolio.user.toBase58())],
-      ['Router ID', formatPublicKey(portfolio.routerId.toBase58())],
-      ['Bump', portfolio.bump.toString()],
-      ['', ''],
-      [chalk.bold('💰 Balance'), ''],
-      ['Equity', formatSol(portfolio.equity)],
-      ['Principal (Deposits)', formatSol(portfolio.principal)],
-      ['Free Collateral', formatSol(portfolio.freeCollateral)],
-      ['', ''],
-      [chalk.bold('📈 PnL & Vesting'), ''],
-      ['Total Realized PnL', formatSol(portfolio.pnl)],
-      ['Vested PnL', formatSol(portfolio.vestedPnl)],
-      ['PnL Index Checkpoint', formatAmount(portfolio.pnlIndexCheckpoint)],
-      ['Last Slot', portfolio.lastSlot.toString()],
-      ['', ''],
-      [chalk.bold('🛡️  Margin & Risk'), ''],
-      ['Initial Margin (IM)', formatSol(portfolio.im)],
-      ['Maintenance Margin (MM)', formatSol(portfolio.mm)],
-      ['Health', formatSol(portfolio.health)],
-      ['Last Mark Timestamp', portfolio.lastMarkTs.toString()],
-      ['', ''],
-      [chalk.bold('⚠️  Liquidation'), ''],
-      ['Last Liquidation Ts', portfolio.lastLiquidationTs.toString()],
-      ['Cooldown (seconds)', portfolio.cooldownSeconds.toString()],
-      ['', ''],
-      [chalk.bold('📍 Positions & LP'), ''],
-      ['Active Exposures', portfolio.exposureCount.toString()],
-      ['Active LP Buckets', portfolio.lpBuckets.length.toString()]
+    const balanceBox = boxen(
+      chalk.bold.white(`Equity: ${chalk.green(equity)} SOL\n`) +
+      chalk.gray(`Free: ${freeCollateral} SOL  |  IM: ${im} SOL  |  PnL: ${pnl} SOL`),
+      {
+        padding: { left: 2, right: 2, top: 0, bottom: 0 },
+        margin: { top: 0, bottom: 1, left: 0, right: 0 },
+        borderStyle: 'round',
+        borderColor: 'cyan',
+        title: '💰 Balance',
+        titleAlignment: 'left'
+      }
     );
 
-    console.log(summaryTable.toString());
+    console.log(balanceBox);
+
+    // Positions summary (if any)
+    if (portfolio.exposures.length > 0) {
+      const positionsBox = boxen(
+        chalk.white(`${portfolio.exposures.length} active position${portfolio.exposures.length > 1 ? 's' : ''}`),
+        {
+          padding: { left: 2, right: 2, top: 0, bottom: 0 },
+          margin: { top: 0, bottom: 1, left: 0, right: 0 },
+          borderStyle: 'round',
+          borderColor: 'yellow',
+          title: '📍 Positions',
+          titleAlignment: 'left'
+        }
+      );
+      console.log(positionsBox);
+    }
 
     // Display exposures if any
     if (portfolio.exposures.length > 0) {
-      console.log(chalk.bold('\n📍 Trading Positions\n'));
-
       const exposuresTable = new Table({
-        head: ['Slab', 'Instrument', 'Position Qty', 'Entry Price', 'Mark Price', 'Unrealized PnL', 'Realized PnL', 'Notional', 'Leverage'],
-        colWidths: [30, 30, 15, 15, 15, 16, 16, 15, 10],
+        head: ['Size', 'Entry', 'Mark', 'PnL', 'Notional', 'Lev'],
+        colWidths: [12, 12, 12, 14, 14, 6],
+        style: {
+          head: ['cyan']
+        }
       });
 
       // Resolve slab addresses from registry
@@ -130,26 +131,15 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
         process.exit(1);
       }
 
-      spinner.succeed(`Registry loaded with ${registry.slabs.length} registered slabs`);
-
-      // Debug: log registry contents
-      console.log(chalk.gray('\nRegistry contents:'));
-      for (let i = 0; i < Math.min(5, registry.slabs.length); i++) {
-        const entry = registry.slabs[i];
-        console.log(chalk.gray(`  [${i}] ${entry.slabId.toBase58()} (active: ${entry.active})`));
-      }
-      console.log();
+      spinner.succeed(`Loaded ${portfolio.exposures.length} position${portfolio.exposures.length > 1 ? 's' : ''}`);
 
       // Import SlabClient for fetching instrument info
       const { SlabClient } = await import('@barista-dex/sdk');
       const slabClient = new SlabClient(connection, new PublicKey(config.slabProgramId));
 
       for (const exp of portfolio.exposures) {
-        console.log(chalk.gray(`Looking up position: slabIndex=${exp.slabIndex}, instrumentIndex=${exp.instrumentIndex}, qty=${exp.positionQty.toString()}`));
-
         // Resolve slab address from registry index
         const slabEntry = registry.slabs[exp.slabIndex];
-        console.log(chalk.gray(`  slabEntry: ${slabEntry ? `${slabEntry.slabId.toBase58()} (active=${slabEntry.active})` : 'undefined'}`));
 
         const slabAddress = slabEntry && slabEntry.active
           ? slabEntry.slabId.toBase58()
@@ -215,7 +205,7 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
             (exp as any).positionLeverage = positionLeverage;
           }
         } catch (err) {
-          console.log(chalk.gray(`  Warning: Failed to fetch PositionDetails: ${err}`));
+          // Silently continue if PositionDetails not found
         }
 
         if (slabEntry && slabEntry.active) {
@@ -288,14 +278,17 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           }
         }
 
+        // Format PnL with color
+        const pnlFormatted = unrealizedPnl === '—' ? '—' :
+          parseFloat(unrealizedPnl) >= 0 ?
+            chalk.green(`+${unrealizedPnl}`) :
+            chalk.red(unrealizedPnl);
+
         exposuresTable.push([
-          slabAddress,
-          instrumentAddress,
           formatAmount(exp.positionQty),
           entryPrice.isZero() ? '—' : `$${formatAmount(entryPrice)}`,
           markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
-          unrealizedPnl,
-          realizedPnl,
+          pnlFormatted,
           notional === '—' ? '—' : `$${notional}`,
           effectiveLeverage,
         ]);
