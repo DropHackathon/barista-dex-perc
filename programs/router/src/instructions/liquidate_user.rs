@@ -245,7 +245,7 @@ pub fn process_liquidate_user(
     process_execute_cross_slab(
         portfolio_account,
         portfolio,
-        &user_pubkey,
+        portfolio_account, // TODO: Should be actual user account
         dlp_portfolio_account,
         dlp_portfolio,
         registry,
