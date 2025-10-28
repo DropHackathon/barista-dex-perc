@@ -148,20 +148,36 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
       const { SlabClient } = await import('@barista-dex/sdk');
       const slabClient = new SlabClient(connection, new PublicKey(config.slabProgramId));
 
+      // Group exposures by instrument address for netting
+      interface PositionData {
+        instrumentAddress: string;
+        totalQty: BN;
+        weightedEntryPrice: BN; // For calculating avg entry
+        totalNotional: BN;
+        markPrice: BN;
+        totalMarginHeld: BN;
+        totalRealizedPnl: BN;
+        slabPositions: Array<{
+          slabIndex: number;
+          instrumentIndex: number;
+          qty: BN;
+          entryPrice: BN;
+          marginHeld: BN;
+        }>;
+      }
+
+      const positionsByInstrument = new Map<string, PositionData>();
+
       for (const exp of portfolio.exposures) {
         // Resolve slab address from registry index
         const slabEntry = registry.slabs[exp.slabIndex];
 
-        const slabAddress = slabEntry && slabEntry.active
-          ? slabEntry.slabId.toBase58()
-          : `Unknown (Index ${exp.slabIndex})`;
-
         // Fetch instrument address and price
-        let instrumentAddress = `Unknown (Index ${exp.instrumentIndex})`;
+        let instrumentAddress = `Unknown-${exp.slabIndex}-${exp.instrumentIndex}`;
         let markPrice = new BN(0);
         let entryPrice = new BN(0);
-        let realizedPnl = '—';
-        let unrealizedPnl = '—';
+        let marginHeld = new BN(0);
+        let realizedPnlValue = new BN(0);
 
         // Fetch PositionDetails for entry price and realized PnL
         try {
@@ -175,45 +191,15 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           const positionDetailsAccount = await connection.getAccountInfo(positionDetailsPda);
           if (positionDetailsAccount && positionDetailsAccount.data.length >= 136) {
             const data = positionDetailsAccount.data;
-            // PositionDetails layout:
-            // - magic (u64): 8 bytes
-            // - portfolio (Pubkey): 32 bytes
-            // - slab_index (u16): 2 bytes
-            // - instrument_index (u16): 2 bytes
-            // - bump (u8): 1 byte
-            // - _padding1: 3 bytes
-            // - avg_entry_price (i64): 8 bytes at offset 48
-            // - total_qty (i64): 8 bytes at offset 56
-            // - realized_pnl (i128): 16 bytes at offset 64
-            // - total_fees (i128): 16 bytes at offset 80
-            // - trade_count (u32): 4 bytes at offset 96
-            // - _padding2: 4 bytes
-            // - last_update_ts (i64): 8 bytes at offset 104
-            // - margin_held (u128): 16 bytes at offset 112
-            // - leverage (u8): 1 byte at offset 128
             const entryPriceOffset = 48;
             const realizedPnlOffset = 64;
             const marginHeldOffset = 112;
-            const leverageOffset = 128;
 
             entryPrice = new BN(data.readBigInt64LE(entryPriceOffset).toString());
-            // Read i128 as two i64s (low, high)
             const pnlLow = data.readBigInt64LE(realizedPnlOffset);
-            const pnlHigh = data.readBigInt64LE(realizedPnlOffset + 8);
-            // Combine into i128 (simplified for display)
-            const realizedPnlValue = pnlLow; // Use low 64 bits for display
-            realizedPnl = formatAmount(new BN(realizedPnlValue.toString()));
-
-            // Read margin_held (u128) - use low 64 bits for display
+            realizedPnlValue = new BN(pnlLow.toString());
             const marginLow = data.readBigInt64LE(marginHeldOffset);
-            const marginHeldLamports = new BN(marginLow.toString());
-
-            // Read leverage (u8)
-            const positionLeverage = data.readUInt8(leverageOffset);
-
-            // Store for later use in leverage calculation
-            (exp as any).marginHeld = marginHeldLamports;
-            (exp as any).positionLeverage = positionLeverage;
+            marginHeld = new BN(marginLow.toString());
           }
         } catch (err) {
           // Silently continue if PositionDetails not found
@@ -226,23 +212,12 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
               instrumentAddress = instruments[exp.instrumentIndex].pubkey.toBase58();
             }
 
-            // For localnet, read live oracle price (updated by keeper with CoinGecko feed)
-            // For mainnet/devnet, use mark_px from slab state (static initialization value)
+            // Fetch mark price
             if (config.cluster === 'localnet') {
-              // Fetch oracle price directly
               try {
                 const oracleAccountInfo = await connection.getAccountInfo(slabEntry.oracleId);
                 if (oracleAccountInfo && oracleAccountInfo.data.length >= 128) {
                   const data = oracleAccountInfo.data;
-
-                  // Deserialize PriceOracle struct:
-                  // - magic (u64): 8 bytes
-                  // - version (u8): 1 byte
-                  // - bump (u8): 1 byte
-                  // - _padding: 6 bytes
-                  // - authority (Pubkey): 32 bytes
-                  // - instrument (Pubkey): 32 bytes
-                  // - price (i64): 8 bytes at offset 80
                   const priceOffset = 80;
                   markPrice = new BN(data.readBigInt64LE(priceOffset).toString());
                 }
@@ -250,55 +225,104 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
                 console.error(chalk.yellow(`  Warning: Failed to read oracle price: ${oracleErr}`));
               }
             } else {
-              // For mainnet/devnet, use mark_px from slab state
               const slabState = await slabClient.getSlabState(slabEntry.slabId);
               if (slabState && slabState.markPx) {
                 markPrice = slabState.markPx;
               }
             }
-
-            // Calculate unrealized PnL if we have both prices
-            if (!markPrice.isZero() && !entryPrice.isZero() && !exp.positionQty.isZero()) {
-              // unrealized_pnl = position_qty * (mark_price - entry_price) / 1e6
-              const priceDiff = markPrice.sub(entryPrice);
-              const pnl = exp.positionQty.mul(priceDiff).div(new BN(1_000_000));
-              unrealizedPnl = formatAmount(pnl);
-            }
           } catch (err) {
             // Fallback to unknown if fetch fails
-            instrumentAddress = `Unknown (Index ${exp.instrumentIndex})`;
           }
         }
 
-        // Calculate notional value and aggregate effective leverage
-        let notional = '—';
-        let effectiveLeverage = '—';
+        // Aggregate by instrument
+        const existing = positionsByInstrument.get(instrumentAddress);
+        if (existing) {
+          // Net the quantity
+          existing.totalQty = existing.totalQty.add(exp.positionQty);
 
-        if (!markPrice.isZero() && !exp.positionQty.isZero()) {
-          // Display notional in USD (for information)
-          // notional_usd = position_qty × mark_price / 1e6 (both in 1e6 scale)
-          const notionalUsd = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
-          notional = formatAmount(notionalUsd);
+          // Weighted entry price (weighted by notional)
+          const notional = exp.positionQty.abs().mul(entryPrice);
+          existing.weightedEntryPrice = existing.weightedEntryPrice.add(notional);
+          existing.totalNotional = existing.totalNotional.add(exp.positionQty.abs());
 
-          // Calculate aggregate effective leverage using margin formula
-          // Notional in lamports (for leverage calc) = position_qty × 1000
-          // This matches the margin calculation: margin = (qty × 1000) / leverage
-          // So: leverage = (qty × 1000) / margin = notional_lamports / margin
-          const marginHeld = (exp as any).marginHeld as BN | undefined;
+          // Sum margin
+          existing.totalMarginHeld = existing.totalMarginHeld.add(marginHeld);
+          existing.totalRealizedPnl = existing.totalRealizedPnl.add(realizedPnlValue);
 
-          if (marginHeld && marginHeld.gt(new BN(0))) {
-            const notionalLamports = exp.positionQty.abs().mul(new BN(1_000));
-            // effective_leverage = notional_lamports / margin_held
-            const leverage = notionalLamports.mul(new BN(100)).div(marginHeld); // × 100 for 2 decimal places
-            const leverageFloat = leverage.toNumber() / 100;
-            effectiveLeverage = `${leverageFloat.toFixed(2)}x`;
+          // Update mark price (use latest)
+          if (!markPrice.isZero()) {
+            existing.markPrice = markPrice;
           }
+
+          // Track underlying slab positions
+          existing.slabPositions.push({
+            slabIndex: exp.slabIndex,
+            instrumentIndex: exp.instrumentIndex,
+            qty: exp.positionQty,
+            entryPrice,
+            marginHeld,
+          });
+        } else {
+          positionsByInstrument.set(instrumentAddress, {
+            instrumentAddress,
+            totalQty: exp.positionQty,
+            weightedEntryPrice: exp.positionQty.abs().mul(entryPrice),
+            totalNotional: exp.positionQty.abs(),
+            markPrice,
+            totalMarginHeld: marginHeld,
+            totalRealizedPnl: realizedPnlValue,
+            slabPositions: [{
+              slabIndex: exp.slabIndex,
+              instrumentIndex: exp.instrumentIndex,
+              qty: exp.positionQty,
+              entryPrice,
+              marginHeld,
+            }],
+          });
+        }
+      }
+
+      // Now display netted positions
+      for (const [instrumentAddr, position] of positionsByInstrument.entries()) {
+        // Skip if position is completely flat
+        if (position.totalQty.isZero()) {
+          continue;
+        }
+
+        // Calculate weighted average entry price
+        const avgEntryPrice = position.totalNotional.isZero()
+          ? new BN(0)
+          : position.weightedEntryPrice.div(position.totalNotional);
+
+        // Calculate unrealized PnL
+        let unrealizedPnl = '—';
+        if (!position.markPrice.isZero() && !avgEntryPrice.isZero() && !position.totalQty.isZero()) {
+          const priceDiff = position.markPrice.sub(avgEntryPrice);
+          const pnl = position.totalQty.mul(priceDiff).div(new BN(1_000_000));
+          unrealizedPnl = formatAmount(pnl);
+        }
+
+        // Calculate notional value
+        let notional = '—';
+        if (!position.markPrice.isZero() && !position.totalQty.isZero()) {
+          const notionalUsd = position.totalQty.abs().mul(position.markPrice).div(new BN(1_000_000));
+          notional = formatAmount(notionalUsd);
+        }
+
+        // Calculate aggregate effective leverage
+        let effectiveLeverage = '—';
+        if (position.totalMarginHeld.gt(new BN(0)) && !position.totalQty.isZero()) {
+          const notionalLamports = position.totalQty.abs().mul(new BN(1_000));
+          const leverage = notionalLamports.mul(new BN(100)).div(position.totalMarginHeld);
+          const leverageFloat = leverage.toNumber() / 100;
+          effectiveLeverage = `${leverageFloat.toFixed(2)}x`;
         }
 
         // Format market identifier (truncated instrument address)
-        const marketId = instrumentAddress.startsWith('Unknown')
-          ? `Slab ${exp.slabIndex}:${exp.instrumentIndex}`
-          : `${instrumentAddress.slice(0, 4)}...${instrumentAddress.slice(-4)}`;
+        const marketId = instrumentAddr.startsWith('Unknown')
+          ? instrumentAddr
+          : `${instrumentAddr.slice(0, 4)}...${instrumentAddr.slice(-4)}`;
 
         // Format PnL with color
         const pnlFormatted = unrealizedPnl === '—' ? '—' :
@@ -306,11 +330,12 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
             chalk.green(`+${unrealizedPnl}`) :
             chalk.red(unrealizedPnl);
 
+        // Add row with netted position
         exposuresTable.push([
           marketId,
-          formatAmount(exp.positionQty),
-          entryPrice.isZero() ? '—' : `$${formatAmount(entryPrice)}`,
-          markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
+          formatAmount(position.totalQty),
+          avgEntryPrice.isZero() ? '—' : `$${formatAmount(avgEntryPrice)}`,
+          position.markPrice.isZero() ? '—' : `$${formatAmount(position.markPrice)}`,
           pnlFormatted,
           notional === '—' ? '—' : `$${notional}`,
           effectiveLeverage,
