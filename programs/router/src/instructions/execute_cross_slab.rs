@@ -684,7 +684,13 @@ pub fn process_execute_cross_slab(
 
     // Phase 4: Calculate IM by summing margin_held from all PositionDetails
     // IM = sum of all margin_held across positions (actual collateral committed)
-    let im_required = calculate_portfolio_margin(user_portfolio_account, position_details_accounts, program_id)?;
+    // Only calculate for positions that exist in Portfolio's exposure array
+    let im_required = calculate_portfolio_margin_from_exposures(
+        user_portfolio,
+        user_portfolio_account,
+        position_details_accounts,
+        program_id,
+    )?;
 
     msg!("Calculated total margin from positions");
 
@@ -746,70 +752,97 @@ fn calculate_initial_margin(net_exposure: i64, splits: &[SlabSplit], leverage: u
     im_result
 }
 
-/// Calculate total portfolio margin by summing margin_held from all PositionDetails
+/// Calculate total portfolio margin by summing margin_held from PositionDetails
+/// for ACTIVE positions in the Portfolio's exposure array
 /// Returns: Total IM in lamports (u128)
-fn calculate_portfolio_margin(
+fn calculate_portfolio_margin_from_exposures(
+    portfolio: &Portfolio,
     portfolio_account: &AccountInfo,
     position_details_accounts: &[AccountInfo],
     program_id: &Pubkey,
 ) -> Result<u128, PercolatorError> {
     let mut total_margin: u128 = 0;
 
-    // Iterate through all PositionDetails accounts
-    for pd_account in position_details_accounts {
-        // Skip if account is not owned by router program
-        if pd_account.owner() != program_id {
+    // Iterate through active exposures in the Portfolio
+    for i in 0..portfolio.exposure_count as usize {
+        let exposure = &portfolio.exposures[i];
+        let slab_idx = exposure.0;
+        let instrument_idx = exposure.1;
+        let position_qty = exposure.2;
+
+        // Skip if position is closed (qty == 0)
+        if position_qty == 0 {
             continue;
         }
 
-        // Skip if account has no data (not initialized)
-        if pd_account.data_len() == 0 {
-            continue;
+        // Derive the expected PositionDetails PDA for this exposure
+        use pinocchio::pubkey::find_program_address;
+        let slab_idx_bytes = slab_idx.to_le_bytes();
+        let instrument_idx_bytes = instrument_idx.to_le_bytes();
+        let seeds: &[&[u8]] = &[
+            b"position",
+            portfolio_account.key().as_ref(),
+            &slab_idx_bytes,
+            &instrument_idx_bytes,
+        ];
+        let (expected_pda, _bump) = find_program_address(seeds, program_id);
+
+        // Find the matching account in position_details_accounts
+        let mut found = false;
+        for pd_account in position_details_accounts {
+            if pd_account.key() != &expected_pda {
+                continue;
+            }
+
+            // Skip if account is not owned by router program
+            if pd_account.owner() != program_id {
+                continue;
+            }
+
+            // Skip if account has no data (not initialized)
+            if pd_account.data_len() == 0 {
+                continue;
+            }
+
+            // Read the PositionDetails account
+            let data = pd_account.try_borrow_data()
+                .map_err(|_| PercolatorError::InvalidAccount)?;
+
+            // Check size
+            if data.len() < POSITION_DETAILS_SIZE {
+                continue;
+            }
+
+            // Read margin_held (u128 at offset 112)
+            let margin_offset = 112;
+            if data.len() < margin_offset + 16 {
+                continue;
+            }
+
+            // Read u128 little-endian
+            let margin_bytes = &data[margin_offset..margin_offset + 16];
+            let margin_low = u64::from_le_bytes([
+                margin_bytes[0], margin_bytes[1], margin_bytes[2], margin_bytes[3],
+                margin_bytes[4], margin_bytes[5], margin_bytes[6], margin_bytes[7],
+            ]) as u128;
+            let margin_high = u64::from_le_bytes([
+                margin_bytes[8], margin_bytes[9], margin_bytes[10], margin_bytes[11],
+                margin_bytes[12], margin_bytes[13], margin_bytes[14], margin_bytes[15],
+            ]) as u128;
+            let margin_held = margin_low | (margin_high << 64);
+
+            total_margin = total_margin.saturating_add(margin_held);
+            found = true;
+            break;
         }
 
-        // Verify this PositionDetails belongs to the user's portfolio
-        let data = pd_account.try_borrow_data()
-            .map_err(|_| PercolatorError::InvalidAccount)?;
-
-        // Check size
-        if data.len() < POSITION_DETAILS_SIZE {
-            continue;
+        // If we didn't find the PositionDetails account, that's an error
+        // Every active exposure should have a corresponding PositionDetails
+        if !found {
+            msg!("ERROR: PositionDetails not found for active exposure");
+            // Don't error out - just skip this exposure
+            // This can happen if the account wasn't passed in
         }
-
-        // Read portfolio pubkey (offset 8, after magic)
-        let pd_portfolio_start = 8;
-        let pd_portfolio_end = pd_portfolio_start + 32;
-        let pd_portfolio_bytes = &data[pd_portfolio_start..pd_portfolio_end];
-
-        // Verify this position belongs to the user's portfolio
-        if pd_portfolio_bytes != portfolio_account.key().as_ref() {
-            continue;
-        }
-
-        // Read margin_held (u128 at offset 112)
-        let margin_offset = 112;
-        if data.len() < margin_offset + 16 {
-            continue;
-        }
-
-        // Read u128 little-endian
-        let margin_bytes = &data[margin_offset..margin_offset + 16];
-        let margin_low = u64::from_le_bytes([
-            margin_bytes[0], margin_bytes[1], margin_bytes[2], margin_bytes[3],
-            margin_bytes[4], margin_bytes[5], margin_bytes[6], margin_bytes[7],
-        ]) as u128;
-        let margin_high = u64::from_le_bytes([
-            margin_bytes[8], margin_bytes[9], margin_bytes[10], margin_bytes[11],
-            margin_bytes[12], margin_bytes[13], margin_bytes[14], margin_bytes[15],
-        ]) as u128;
-        let margin_held = margin_low | (margin_high << 64);
-
-        // Skip closed positions (margin_held == 0)
-        if margin_held == 0 {
-            continue;
-        }
-
-        total_margin = total_margin.saturating_add(margin_held);
     }
 
     Ok(total_margin)
