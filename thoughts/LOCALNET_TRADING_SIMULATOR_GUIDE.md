@@ -391,6 +391,62 @@ export BARISTA_ORACLE_PROGRAM=<ORACLE_PROGRAM_ID>
   --rpc-url http://localhost:8899
 ```
 
+For automated price updates from real market data (CoinGecko API):
+
+```bash
+# Start oracle crank (fetches from CoinGecko by default)
+./target/release/percolator-keeper oracle crank \
+  --oracle <ORACLE_ADDRESS> \
+  --instrument BTC \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899 \
+  --interval 30
+
+# Example for different assets:
+# BTC:  --instrument BTC
+# ETH:  --instrument ETH
+# SOL:  --instrument SOL
+# USDC: --instrument USDC
+# USDT: --instrument USDT
+
+# Or use full instrument names:
+# BTC/USD, BTC-PERP, ETH/USD, SOL-PERP, etc.
+# The crank extracts the base symbol (BTC, ETH, SOL) and maps to CoinGecko ID
+
+# The crank will:
+# - Fetch current price from CoinGecko API every 30 seconds
+# - Update the on-chain oracle if price changed significantly
+# - Display price updates in terminal
+# - Run continuously until you press Ctrl+C
+
+# You can also specify the price source explicitly:
+./target/release/percolator-keeper oracle crank \
+  --oracle <ORACLE_ADDRESS> \
+  --instrument SOL \
+  --source coingecko \
+  --interval 30 \
+  --keypair ~/.config/solana/dlp-wallet.json \
+  --rpc-url http://localhost:8899
+
+# Other supported sources:
+# --source binance   (for Binance spot prices)
+# --source coinbase  (for Coinbase prices)
+
+# Press Ctrl+C to stop the crank
+```
+
+**Supported Instrument Symbols** (auto-mapped to CoinGecko):
+- `BTC` → bitcoin
+- `ETH` → ethereum
+- `SOL` → solana
+- `USDC` → usd-coin
+- `USDT` → tether
+- Any other symbol → used as-is (must match CoinGecko ID)
+
+**Find CoinGecko IDs**: https://www.coingecko.com/
+
+---
+
 **Your DLP setup is complete!** You now have:
 - ✅ Portfolio with 1000 SOL capital
 - ✅ Slab for BTC-PERP trading
@@ -823,64 +879,6 @@ Update oracle prices to simulate market movements using the keeper:
 # Traders can also check the new price
 barista price --oracle <ORACLE_ADDRESS> --network localnet
 ```
-
-### Automated Price Updates (Oracle Crank with CoinGecko Feed)
-
-For automated price updates from real market data (CoinGecko API):
-
-```bash
-# Start oracle crank (fetches from CoinGecko by default)
-./target/release/percolator-keeper oracle crank \
-  --oracle <ORACLE_ADDRESS> \
-  --instrument BTC \
-  --keypair ~/.config/solana/dlp-wallet.json \
-  --rpc-url http://localhost:8899 \
-  --interval 30
-
-# Example for different assets:
-# BTC:  --instrument BTC
-# ETH:  --instrument ETH
-# SOL:  --instrument SOL
-# USDC: --instrument USDC
-# USDT: --instrument USDT
-
-# Or use full instrument names:
-# BTC/USD, BTC-PERP, ETH/USD, SOL-PERP, etc.
-# The crank extracts the base symbol (BTC, ETH, SOL) and maps to CoinGecko ID
-
-# The crank will:
-# - Fetch current price from CoinGecko API every 30 seconds
-# - Update the on-chain oracle if price changed significantly
-# - Display price updates in terminal
-# - Run continuously until you press Ctrl+C
-
-# You can also specify the price source explicitly:
-./target/release/percolator-keeper oracle crank \
-  --oracle <ORACLE_ADDRESS> \
-  --instrument SOL \
-  --source coingecko \
-  --interval 30 \
-  --keypair ~/.config/solana/dlp-wallet.json \
-  --rpc-url http://localhost:8899
-
-# Other supported sources:
-# --source binance   (for Binance spot prices)
-# --source coinbase  (for Coinbase prices)
-
-# Press Ctrl+C to stop the crank
-```
-
-**Supported Instrument Symbols** (auto-mapped to CoinGecko):
-- `BTC` → bitcoin
-- `ETH` → ethereum
-- `SOL` → solana
-- `USDC` → usd-coin
-- `USDT` → tether
-- Any other symbol → used as-is (must match CoinGecko ID)
-
-**Find CoinGecko IDs**: https://www.coingecko.com/
-
----
 
 ## Monitoring and Analytics
 

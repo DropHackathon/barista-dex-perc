@@ -479,6 +479,7 @@ pub fn process_execute_cross_slab(
         let same_direction = (is_buy && current_exposure >= 0) || (!is_buy && current_exposure <= 0);
 
         use pinocchio::sysvars::{clock::Clock, Sysvar};
+        use pinocchio::log::sol_log_64;
         let timestamp = Clock::get()
             .map(|clock| clock.unix_timestamp)
             .unwrap_or(0);
@@ -491,6 +492,11 @@ pub fn process_execute_cross_slab(
             let leverage_u128 = leverage as u128;
             let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
 
+            msg!("MARGIN DEBUG: Adding position");
+            sol_log_64(filled_qty as u64, leverage as u64, margin_lamports as u64, 0, 0);
+            msg!("MARGIN DEBUG: User equity BEFORE");
+            sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
+
             position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp, margin_lamports);
 
             transfer_collateral_margin(
@@ -500,6 +506,9 @@ pub fn process_execute_cross_slab(
                 dlp_portfolio,
                 margin_lamports,
             )?;
+
+            msg!("MARGIN DEBUG: User equity AFTER");
+            sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
 
             0i128 // No realized PnL when adding
         } else {
@@ -512,11 +521,23 @@ pub fn process_execute_cross_slab(
                 // Case 2: Partial or full close (leverage is IGNORED)
                 msg!("Reducing/closing position");
 
+                msg!("MARGIN DEBUG: Before reduce - exposure and filled");
+                sol_log_64(current_exposure as u64, filled_qty as u64, 0, 0, 0);
+                msg!("MARGIN DEBUG: PD before - qty and margin");
+                sol_log_64(position_details.total_qty as u64, position_details.margin_held as u64, 0, 0, 0);
+
                 let (pnl, new_qty, margin_to_release) = position_details.reduce_position(vwap_px, filled_qty, 0i128, timestamp);
+
+                msg!("MARGIN DEBUG: After reduce - new_qty and margin_to_release");
+                sol_log_64(new_qty as u64, margin_to_release as u64, 0, 0, 0);
+                msg!("MARGIN DEBUG: PD after - qty and margin");
+                sol_log_64(position_details.total_qty as u64, position_details.margin_held as u64, 0, 0, 0);
 
                 // Return margin collateral from DLP to user
                 if margin_to_release > 0 {
                     msg!("Returning margin to user");
+                    msg!("MARGIN DEBUG: User equity BEFORE return");
+                    sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
                     return_margin_to_user(
                         user_portfolio_account,
                         user_portfolio,
@@ -524,6 +545,8 @@ pub fn process_execute_cross_slab(
                         dlp_portfolio,
                         margin_to_release,
                     )?;
+                    msg!("MARGIN DEBUG: User equity AFTER return");
+                    sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
                 }
 
                 // Check if position is fully closed
@@ -540,13 +563,23 @@ pub fn process_execute_cross_slab(
                 // Case 3: Position reversal - close existing, open new in opposite direction
                 msg!("Position reversal: closing existing and opening opposite");
 
+                msg!("MARGIN DEBUG: Reversal - exposure and filled");
+                sol_log_64(current_exposure as u64, filled_qty as u64, 0, 0, 0);
+                msg!("MARGIN DEBUG: PD before reversal - qty and margin");
+                sol_log_64(position_details.total_qty as u64, position_details.margin_held as u64, 0, 0, 0);
+
                 // Step 1: Close the entire existing position
                 let close_qty = if current_exposure > 0 { -current_abs } else { current_abs };
                 let (pnl, _, margin_to_release) = position_details.reduce_position(vwap_px, close_qty, 0i128, timestamp);
 
+                msg!("MARGIN DEBUG: After reversal close - margin_to_release");
+                sol_log_64(margin_to_release as u64, 0, 0, 0, 0);
+
                 // Return all margin from closed position
                 if margin_to_release > 0 {
                     msg!("Returning margin from closed position");
+                    msg!("MARGIN DEBUG: User equity BEFORE reversal return");
+                    sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
                     return_margin_to_user(
                         user_portfolio_account,
                         user_portfolio,
@@ -554,6 +587,8 @@ pub fn process_execute_cross_slab(
                         dlp_portfolio,
                         margin_to_release,
                     )?;
+                    msg!("MARGIN DEBUG: User equity AFTER reversal return");
+                    sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
                 }
 
                 // Close the old PositionDetails PDA (position fully closed)
@@ -601,6 +636,9 @@ pub fn process_execute_cross_slab(
                 let remaining_qty_u128 = remaining_qty_abs as u128;
                 let new_margin = (remaining_qty_u128 * 1_000) / leverage_u128;
 
+                msg!("MARGIN DEBUG: Opening reversed - remaining_qty, leverage, new_margin");
+                sol_log_64(remaining_qty_abs as u64, leverage as u64, new_margin as u64, 0, 0);
+
                 let new_position = PositionDetails::new(
                     *user_portfolio_account.key(),
                     slab_idx,
@@ -621,6 +659,9 @@ pub fn process_execute_cross_slab(
                 updated_position.add_to_position(vwap_px, new_qty, 0i128, timestamp, new_margin);
                 save_position_details(position_details_account, &updated_position)?;
 
+                msg!("MARGIN DEBUG: User equity BEFORE new margin transfer");
+                sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
+
                 // Transfer new margin from user to DLP
                 transfer_collateral_margin(
                     user_portfolio_account,
@@ -629,6 +670,9 @@ pub fn process_execute_cross_slab(
                     dlp_portfolio,
                     new_margin,
                 )?;
+
+                msg!("MARGIN DEBUG: User equity AFTER new margin transfer");
+                sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
 
                 // Update position_details reference for later use
                 position_details = updated_position;

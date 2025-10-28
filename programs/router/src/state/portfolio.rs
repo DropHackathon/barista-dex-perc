@@ -76,7 +76,7 @@ impl Portfolio {
 
     // Compile-time size check - will cause build to fail if size doesn't match
     const _SIZE_CHECK: () = {
-        const EXPECTED: usize = 12176;
+        const EXPECTED: usize = 12592;
         const ACTUAL: usize = core::mem::size_of::<Portfolio>();
         const _: [(); ACTUAL] = [(); EXPECTED];
     };

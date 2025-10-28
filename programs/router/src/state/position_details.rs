@@ -12,7 +12,7 @@
 use pinocchio::pubkey::Pubkey;
 
 /// Size of PositionDetails account
-pub const POSITION_DETAILS_SIZE: usize = 136;
+pub const POSITION_DETAILS_SIZE: usize = 144;
 
 /// Magic bytes for PositionDetails validation
 pub const POSITION_DETAILS_MAGIC: &[u8; 8] = b"BARTPOSN";

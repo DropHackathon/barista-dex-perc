@@ -81,8 +81,8 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
     const im = formatSol(portfolio.im);
 
     const balanceBox = boxen(
-      chalk.bold.white(`Equity: ${chalk.green(equity)} SOL\n`) +
-      chalk.gray(`Free: ${freeCollateral} SOL  |  IM: ${im} SOL  |  PnL: ${pnl} SOL`),
+      chalk.bold.white(`Equity: ${chalk.green(equity)} units\n`) +
+      chalk.gray(`Free: ${freeCollateral} units  |  IM: ${im} units  |  PnL: ${pnl} units`),
       {
         padding: { left: 2, right: 2, top: 0, bottom: 0 },
         margin: { top: 0, bottom: 1, left: 0, right: 0 },
