@@ -458,14 +458,14 @@ pub fn process_execute_cross_slab(
                     .map(|clock| clock.unix_timestamp)
                     .unwrap_or(0);
 
-                // Initialize new PositionDetails with zero margin
-                // Margin will be calculated and added in the "adding to position" logic below
+                // Initialize new PositionDetails with zero margin and quantity
+                // Both will be calculated and added in the "adding to position" logic below
                 PositionDetails::new(
                     *user_portfolio_account.key(),
                     slab_idx,
                     instrument_idx,
                     vwap_px,      // entry price for first trade
-                    filled_qty,   // initial quantity
+                    0,            // initial quantity starts at 0, will be added below
                     timestamp,
                     bump,
                     0,            // margin_held starts at 0, will be added below

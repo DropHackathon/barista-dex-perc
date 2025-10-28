@@ -184,16 +184,23 @@ export BARISTA_LOCALNET_SLAB_PROGRAM_ID=<SLAB_PROGRAM_ID>
 # Optional: RPC endpoint (defaults to http://localhost:8899 if not set)
 export BARISTA_LOCALNET_RPC=http://localhost:8899
 
-# For percolator-keeper binary (oracle operations)
+# For percolator-keeper binary (oracle operations and registry)
 export BARISTA_ORACLE_PROGRAM=<ORACLE_PROGRAM_ID>
+
+# IMPORTANT: percolator-keeper uses BARISTA_ROUTER_PROGRAM (not BARISTA_LOCALNET_ROUTER_PROGRAM_ID)
+# Set this to the same value as BARISTA_LOCALNET_ROUTER_PROGRAM_ID for localnet
+export BARISTA_ROUTER_PROGRAM=<ROUTER_PROGRAM_ID>
 
 # Verify configuration
 echo "Router: $BARISTA_LOCALNET_ROUTER_PROGRAM_ID"
 echo "Slab: $BARISTA_LOCALNET_SLAB_PROGRAM_ID"
 echo "Oracle: $BARISTA_ORACLE_PROGRAM"
+echo "Keeper Router: $BARISTA_ROUTER_PROGRAM"
 ```
 
 **Note**: The npm packages (@barista-dex/sdk, @barista-dex/cli-dlp, @barista-dex/cli-client) will automatically use these environment variables for localnet. Mainnet and devnet program IDs are hardcoded in the SDK.
+
+**Important**: The `percolator-keeper` binary reads `BARISTA_ROUTER_PROGRAM` (not `BARISTA_LOCALNET_ROUTER_PROGRAM_ID`). Make sure to set both variables to the same router program ID for localnet operations.
 
 ---
 
@@ -209,6 +216,10 @@ See [REGISTRY_INITIALIZATION.md](./REGISTRY_INITIALIZATION.md) for detailed inst
 # Build keeper binary if not already built
 cargo build --release --bin percolator-keeper
 
+# IMPORTANT: Make sure BARISTA_ROUTER_PROGRAM is set (from Step 2)
+# The keeper uses this env var, not BARISTA_LOCALNET_ROUTER_PROGRAM_ID
+echo "Keeper will use router: $BARISTA_ROUTER_PROGRAM"
+
 # Initialize registry
 ./target/release/percolator-keeper registry init \
   --keypair ~/.config/solana/id.json \
@@ -220,6 +231,8 @@ cargo build --release --bin percolator-keeper
 #   Governance: 3sEw2iqZEuBX9s9DeN8BcUpqaeRoi9BbziQT5QjRwAnN
 #   Signature: <TX_SIG>
 ```
+
+**Troubleshooting**: If you get "Attempt to load a program that does not exist", verify that `BARISTA_ROUTER_PROGRAM` is set to your deployed router program ID.
 
 **Note**: The `registry init` subcommand needs to be added to percolator-keeper. See REGISTRY_INITIALIZATION.md for implementation details.
 
