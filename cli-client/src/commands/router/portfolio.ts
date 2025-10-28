@@ -88,13 +88,12 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
 
     // Main balance box
     const equity = formatSol(portfolio.equity);
-    const freeCollateral = formatSol(portfolio.freeCollateral);
     const pnl = formatSol(portfolio.pnl);
     const im = formatSol(portfolio.im);
 
     const balanceBox = boxen(
       chalk.bold.white(`Equity: ${chalk.green(equity)} units\n`) +
-      chalk.gray(`Free: ${freeCollateral} units  |  IM: ${im} units  |  PnL: ${pnl} units`),
+      chalk.gray(`IM: ${im} units  |  PnL: ${pnl} units`),
       {
         padding: { left: 2, right: 2, top: 0, bottom: 0 },
         margin: { top: 0, bottom: 1, left: 0, right: 0 },
@@ -126,8 +125,8 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
     // Display exposures if any
     if (portfolio.exposures.length > 0) {
       const exposuresTable = new Table({
-        head: ['Size', 'Entry', 'Mark', 'PnL', 'Notional', 'Lev'],
-        colWidths: [12, 12, 12, 14, 14, 6],
+        head: ['Market', 'Size', 'Entry', 'Mark', 'PnL', 'Notional', 'Lev'],
+        colWidths: [20, 16, 16, 16, 18, 18, 10],
         style: {
           head: ['cyan']
         }
@@ -276,21 +275,30 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
         let effectiveLeverage = '—';
 
         if (!markPrice.isZero() && !exp.positionQty.isZero()) {
-          // Notional = position_qty × mark_price / 1e6 (in lamports, same units as margin)
-          const notionalValue = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
-          notional = formatAmount(notionalValue);
+          // Display notional in USD (for information)
+          // notional_usd = position_qty × mark_price / 1e6 (both in 1e6 scale)
+          const notionalUsd = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
+          notional = formatAmount(notionalUsd);
 
-          // Calculate aggregate effective leverage: notional / margin_held
-          // This reflects the actual leverage across all trades on this position
+          // Calculate aggregate effective leverage using margin formula
+          // Notional in lamports (for leverage calc) = position_qty × 1000
+          // This matches the margin calculation: margin = (qty × 1000) / leverage
+          // So: leverage = (qty × 1000) / margin = notional_lamports / margin
           const marginHeld = (exp as any).marginHeld as BN | undefined;
 
           if (marginHeld && marginHeld.gt(new BN(0))) {
-            // effective_leverage = notional_value / margin_held
-            const leverage = notionalValue.mul(new BN(100)).div(marginHeld); // × 100 for 2 decimal places
+            const notionalLamports = exp.positionQty.abs().mul(new BN(1_000));
+            // effective_leverage = notional_lamports / margin_held
+            const leverage = notionalLamports.mul(new BN(100)).div(marginHeld); // × 100 for 2 decimal places
             const leverageFloat = leverage.toNumber() / 100;
             effectiveLeverage = `${leverageFloat.toFixed(2)}x`;
           }
         }
+
+        // Format market identifier (truncated instrument address)
+        const marketId = instrumentAddress.startsWith('Unknown')
+          ? `Slab ${exp.slabIndex}:${exp.instrumentIndex}`
+          : `${instrumentAddress.slice(0, 4)}...${instrumentAddress.slice(-4)}`;
 
         // Format PnL with color
         const pnlFormatted = unrealizedPnl === '—' ? '—' :
@@ -299,6 +307,7 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
             chalk.red(unrealizedPnl);
 
         exposuresTable.push([
+          marketId,
           formatAmount(exp.positionQty),
           entryPrice.isZero() ? '—' : `$${formatAmount(entryPrice)}`,
           markPrice.isZero() ? '—' : `$${formatAmount(markPrice)}`,
