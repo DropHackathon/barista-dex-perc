@@ -12,7 +12,7 @@
 use pinocchio::pubkey::Pubkey;
 
 /// Size of PositionDetails account
-pub const POSITION_DETAILS_SIZE: usize = 144;
+pub const POSITION_DETAILS_SIZE: usize = 136;
 
 /// Magic bytes for PositionDetails validation
 pub const POSITION_DETAILS_MAGIC: &[u8; 8] = b"BARTPOSN";
@@ -93,7 +93,7 @@ impl PositionDetails {
     const _SIZE_CHECK: () = {
         const EXPECTED: usize = POSITION_DETAILS_SIZE;
         const ACTUAL: usize = core::mem::size_of::<PositionDetails>();
-        const _: [(); ACTUAL] = [(); EXPECTED];
+        const _: [(); EXPECTED] = [(); ACTUAL];
     };
 
     /// Create a new position details account
