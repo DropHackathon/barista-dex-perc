@@ -271,22 +271,24 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
           }
         }
 
-        // Calculate notional value and effective leverage
+        // Calculate notional value and aggregate effective leverage
         let notional = '—';
         let effectiveLeverage = '—';
 
         if (!markPrice.isZero() && !exp.positionQty.isZero()) {
-          // Notional = position_qty × mark_price / 1e6 (in SOL/USD value)
+          // Notional = position_qty × mark_price / 1e6 (in lamports, same units as margin)
           const notionalValue = exp.positionQty.abs().mul(markPrice).div(new BN(1_000_000));
           notional = formatAmount(notionalValue);
 
-          // Calculate effective leverage from margin_held stored in PositionDetails
+          // Calculate aggregate effective leverage: notional / margin_held
+          // This reflects the actual leverage across all trades on this position
           const marginHeld = (exp as any).marginHeld as BN | undefined;
-          const positionLeverage = (exp as any).positionLeverage as number | undefined;
 
-          if (marginHeld && marginHeld.gt(new BN(0)) && positionLeverage) {
-            // Display the leverage that was used for this position
-            effectiveLeverage = `${positionLeverage}x`;
+          if (marginHeld && marginHeld.gt(new BN(0))) {
+            // effective_leverage = notional_value / margin_held
+            const leverage = notionalValue.mul(new BN(100)).div(marginHeld); // × 100 for 2 decimal places
+            const leverageFloat = leverage.toNumber() / 100;
+            effectiveLeverage = `${leverageFloat.toFixed(2)}x`;
           }
         }
 
