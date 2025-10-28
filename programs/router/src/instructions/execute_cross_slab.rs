@@ -494,10 +494,15 @@ pub fn process_execute_cross_slab(
 
             msg!("MARGIN DEBUG: Adding position");
             sol_log_64(filled_qty as u64, leverage as u64, margin_lamports as u64, 0, 0);
+            msg!("MARGIN DEBUG: PD BEFORE add_to_position - qty and margin");
+            sol_log_64(position_details.total_qty as u64, position_details.margin_held as u64, 0, 0, 0);
             msg!("MARGIN DEBUG: User equity BEFORE");
             sol_log_64(user_portfolio.equity as u64, 0, 0, 0, 0);
 
             position_details.add_to_position(vwap_px, filled_qty, 0i128, timestamp, margin_lamports);
+
+            msg!("MARGIN DEBUG: PD AFTER add_to_position - qty and margin");
+            sol_log_64(position_details.total_qty as u64, position_details.margin_held as u64, 0, 0, 0);
 
             transfer_collateral_margin(
                 user_portfolio_account,
@@ -681,17 +686,23 @@ pub fn process_execute_cross_slab(
             }
         };
 
-        // If not closed, save PositionDetails (for add_to_position case or partial reduce)
-        if current_exposure != 0 || filled_qty != 0 {
-            if position_details.total_qty != 0 {
-                save_position_details(position_details_account, &position_details)?;
-            }
+        // Update exposure: filled_qty is signed (+buy, -sell from receipt)
+        let new_exposure = current_exposure + filled_qty;
+
+        // If exposure is now zero, this position is fully closed from Portfolio's perspective
+        // Zero out PositionDetails to prevent stale data accumulation
+        if new_exposure == 0 {
+            msg!("Position fully closed - zeroing PositionDetails");
+            position_details.total_qty = 0;
+            position_details.margin_held = 0;
+        }
+
+        // Save PositionDetails if position is still open
+        if position_details.total_qty != 0 {
+            save_position_details(position_details_account, &position_details)?;
         }
 
         total_realized_pnl = total_realized_pnl.saturating_add(realized_pnl);
-
-        // Update exposure: filled_qty is signed (+buy, -sell from receipt)
-        let new_exposure = current_exposure + filled_qty;
 
         user_portfolio.update_exposure(slab_idx, instrument_idx, new_exposure);
     }
