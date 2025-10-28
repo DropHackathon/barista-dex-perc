@@ -74,6 +74,18 @@ export async function portfolioCommand(options: PortfolioOptions): Promise<void>
     // Display portfolio summary with cleaner layout
     console.log('');
 
+    // Derive portfolio address using createWithSeed (NOT PDA)
+    // NOTE: Portfolio uses create_with_seed to bypass 10KB CPI limit
+    const portfolioAddress = await PublicKey.createWithSeed(
+      userAddress,
+      'portfolio',
+      new PublicKey(config.routerProgramId)
+    );
+
+    // Show portfolio address
+    console.log(chalk.gray(`Portfolio Address: ${chalk.cyan(portfolioAddress.toBase58())}`));
+    console.log('');
+
     // Main balance box
     const equity = formatSol(portfolio.equity);
     const freeCollateral = formatSol(portfolio.freeCollateral);
