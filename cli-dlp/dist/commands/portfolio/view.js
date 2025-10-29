@@ -7,7 +7,7 @@ exports.viewCommand = viewCommand;
 const sdk_1 = require("@barista-dex/sdk");
 const ora_1 = __importDefault(require("ora"));
 const chalk_1 = __importDefault(require("chalk"));
-const cli_table3_1 = __importDefault(require("cli-table3"));
+const boxen_1 = __importDefault(require("boxen"));
 const wallet_1 = require("../../utils/wallet");
 const network_1 = require("../../utils/network");
 const display_1 = require("../../utils/display");
@@ -37,58 +37,73 @@ async function viewCommand(options) {
             (0, display_1.displayError)('Portfolio not found. Create one with: barista-dlp deposit');
             process.exit(1);
         }
-        spinner.succeed();
-        // Display portfolio summary
-        console.log();
-        console.log(chalk_1.default.bold.cyan('═══════════════════════════════════════'));
-        console.log(chalk_1.default.bold.cyan('         DLP Portfolio Summary         '));
-        console.log(chalk_1.default.bold.cyan('═══════════════════════════════════════'));
-        console.log();
-        // Capital summary table
-        const capitalTable = new cli_table3_1.default({
-            head: [chalk_1.default.cyan('Metric'), chalk_1.default.cyan('Value')],
-            colWidths: [30, 30],
-            style: {
-                head: [],
-                border: ['gray'],
-            },
-        });
+        spinner.succeed('Portfolio loaded');
+        // Display portfolio summary with cleaner layout
+        console.log('');
+        // Show portfolio address
+        const portfolioAddress = await client.derivePortfolioAddress(wallet.publicKey);
+        console.log(chalk_1.default.gray(`Portfolio Address: ${chalk_1.default.cyan(portfolioAddress.toBase58())}`));
+        console.log('');
+        // Main balance box
         const equity = BigInt(portfolio.equity.toString());
         const pnl = BigInt(portfolio.pnl.toString());
         const principal = equity - pnl;
-        capitalTable.push(['Principal (Deposited)', (0, display_1.formatSolWithSuffix)(principal)], ['Realized PnL', (0, display_1.formatPnl)(pnl)], ['─────────────────────────────', '─────────────────────────────'], [chalk_1.default.bold('Total Equity'), chalk_1.default.bold((0, display_1.formatSolWithSuffix)(equity))]);
-        console.log(capitalTable.toString());
-        console.log();
+        const equityFormatted = (0, display_1.formatSolWithSuffix)(equity);
+        const principalFormatted = (0, display_1.formatSolWithSuffix)(principal);
+        const pnlFormatted = (0, display_1.formatPnl)(pnl);
+        const balanceBox = (0, boxen_1.default)(chalk_1.default.bold.white(`Equity: ${chalk_1.default.green(equityFormatted)}\n`) +
+            chalk_1.default.gray(`Principal: ${principalFormatted}  |  Realized PnL: ${pnlFormatted}`), {
+            padding: { left: 2, right: 2, top: 0, bottom: 0 },
+            margin: { top: 0, bottom: 1, left: 0, right: 0 },
+            borderStyle: 'round',
+            borderColor: 'cyan',
+            title: '💰 DLP Balance',
+            titleAlignment: 'left'
+        });
+        console.log(balanceBox);
         // Warning if PnL is negative (traders are winning)
         if (pnl < 0n) {
-            console.log(chalk_1.default.yellow('⚠'), chalk_1.default.yellow('Warning: Negative PnL - Traders are currently winning'));
-            console.log(chalk_1.default.gray('  This is normal variance, but monitor your risk exposure.'));
-            console.log();
+            const warningBox = (0, boxen_1.default)(chalk_1.default.yellow('Negative PnL - Traders are currently winning\n') +
+                chalk_1.default.gray('This is normal variance, but monitor your risk exposure.'), {
+                padding: { left: 2, right: 2, top: 0, bottom: 0 },
+                margin: { top: 0, bottom: 1, left: 0, right: 0 },
+                borderStyle: 'round',
+                borderColor: 'yellow',
+                title: '⚠️  Warning',
+                titleAlignment: 'left'
+            });
+            console.log(warningBox);
         }
         // Exposure summary (if detailed flag)
         if (options.detailed) {
-            console.log(chalk_1.default.bold.cyan('Exposure Details'));
-            console.log(chalk_1.default.gray('─────────────────────────────────────────'));
-            console.log();
-            // Note: In v0.5, exposure tracking is basic since DLP is sole counterparty
-            // In v1+, this will show per-slab exposure, open interest, Greeks, etc.
-            console.log(chalk_1.default.gray('  Model: DLP Counterparty (v0.5)'));
-            console.log(chalk_1.default.gray('  Role: Sole liquidity provider for all trades'));
-            console.log(chalk_1.default.gray('  Exposure: Direct counterparty to all open positions'));
-            console.log();
-            // Portfolio address info
-            const portfolioAddress = await client.derivePortfolioAddress(wallet.publicKey);
-            console.log(chalk_1.default.bold.cyan('Account Information'));
-            console.log(chalk_1.default.gray('─────────────────────────────────────────'));
-            console.log(chalk_1.default.gray(`  Owner: ${wallet.publicKey.toBase58()}`));
-            console.log(chalk_1.default.gray(`  Portfolio Address: ${portfolioAddress.toBase58()}`));
-            console.log();
+            const exposureBox = (0, boxen_1.default)(chalk_1.default.white('Model: DLP Counterparty (v0.5)\n') +
+                chalk_1.default.gray('Role: Sole liquidity provider for all trades\n') +
+                chalk_1.default.gray('Exposure: Direct counterparty to all open positions'), {
+                padding: { left: 2, right: 2, top: 0, bottom: 0 },
+                margin: { top: 0, bottom: 1, left: 0, right: 0 },
+                borderStyle: 'round',
+                borderColor: 'magenta',
+                title: '📊 Exposure Details',
+                titleAlignment: 'left'
+            });
+            console.log(exposureBox);
+            // Account info
+            const accountBox = (0, boxen_1.default)(chalk_1.default.gray(`Owner: ${wallet.publicKey.toBase58()}\n`) +
+                chalk_1.default.gray(`Portfolio: ${portfolioAddress.toBase58()}`), {
+                padding: { left: 2, right: 2, top: 0, bottom: 0 },
+                margin: { top: 0, bottom: 1, left: 0, right: 0 },
+                borderStyle: 'round',
+                borderColor: 'gray',
+                title: 'ℹ️  Account Information',
+                titleAlignment: 'left'
+            });
+            console.log(accountBox);
         }
         // Quick tips
         console.log(chalk_1.default.gray('💡 Tips:'));
         console.log(chalk_1.default.gray('  • Use --detailed for more information'));
-        console.log(chalk_1.default.gray('  • Create slabs with: barista-dlp slab create'));
-        console.log(chalk_1.default.gray('  • View analytics with: barista-dlp analytics stats'));
+        console.log(chalk_1.default.gray('  • Create slabs: barista-dlp slab-create'));
+        console.log(chalk_1.default.gray('  • View slab: barista-dlp slab-view --address <SLAB>'));
         console.log();
     }
     catch (error) {
