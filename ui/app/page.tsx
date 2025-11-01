@@ -62,6 +62,50 @@ export default function TradePage() {
 
   // Memoize chart symbol using only the instrument pubkey string
   const instrumentKey = selectedMarket?.instrument.toBase58() || '';
+
+  // Memoize position rows to prevent flickering
+  // Round values to 2 decimals to prevent micro-changes from causing re-renders
+  const positionRows = useMemo(() => positions.map((pos, i) => {
+    // Use Binance price for positions matching the selected slab, otherwise use oracle price
+    const isSelectedSlab = selectedSlab && pos.slab.equals(selectedSlab);
+    const displayMarkPrice = isSelectedSlab && binancePrice
+      ? binancePrice
+      : (pos.markPrice.toNumber() / 1e6);
+
+    // Recalculate PnL with Binance price if applicable
+    // PnL = price_diff × quantity × leverage (leveraged exposure)
+    const displayPnl = isSelectedSlab && binancePrice
+      ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6) * pos.leverage)
+      : (pos.unrealizedPnl.toNumber() / 1e6);
+
+    // Calculate notional size (quantity × leverage × mark price)
+    // This shows the leveraged exposure, not just the base quantity
+    const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * pos.leverage * displayMarkPrice);
+
+    // Round to prevent tiny floating point differences from causing re-renders
+    return {
+      pos,
+      displayMarkPrice: Math.round(displayMarkPrice * 100) / 100,
+      displayPnl: Math.round(displayPnl * 100) / 100,
+      notionalSize: Math.round(notionalSize * 100) / 100,
+      entryPrice: Math.round((pos.avgEntryPrice.toNumber() / 1e6) * 100) / 100,
+      leverage: Math.round(pos.leverage * 10) / 10,
+    };
+  }), [
+    positions.map(p => `${p.slab.toBase58()}-${p.quantity.toString()}-${Math.round((p.avgEntryPrice.toNumber() / 1e6) * 100)}-${Math.round((p.unrealizedPnl.toNumber() / 1e6) * 100)}-${Math.round(p.leverage * 10)}`).join(','),
+    selectedSlab?.toBase58(),
+    binancePrice ? Math.round(binancePrice * 100) : null
+  ]);
+
+  // Memoize formatted summary values to prevent flickering
+  // Round to 2 decimals to prevent micro-changes from causing re-renders
+  const formattedSummary = useMemo(() => {
+    const pnl = Math.round((summary.totalUnrealizedPnl.toNumber() / 1e6) * 100) / 100;
+    return {
+      unrealizedPnl: pnl,
+      isUnrealizedNegative: pnl < 0,
+    };
+  }, [Math.round((summary.totalUnrealizedPnl.toNumber() / 1e6) * 100)]);
   const chartSymbol = useMemo(() => {
     if (!instrumentKey) return '';
     return getTradingViewSymbol(new PublicKey(instrumentKey), getConfig().network);
@@ -274,8 +318,8 @@ export default function TradePage() {
                 <div className="flex items-center gap-6">
                   <div className="text-right">
                     <div className="text-xs text-white/50 font-medium uppercase tracking-wider">Portfolio Unrealized PnL</div>
-                    <div className={`text-sm font-semibold ${summary.totalUnrealizedPnl.isNeg() ? 'text-red-400' : 'text-emerald-400'}`}>
-                      ${(summary.totalUnrealizedPnl.toNumber() / 1e6).toFixed(2)}
+                    <div className={`text-sm font-semibold ${formattedSummary.isUnrealizedNegative ? 'text-red-400' : 'text-emerald-400'}`}>
+                      ${formattedSummary.unrealizedPnl.toFixed(2)}
                     </div>
                   </div>
                   <div className="text-right">
@@ -357,49 +401,31 @@ export default function TradePage() {
                         <div className="text-right">Lev</div>
                         <div className="text-right">Close</div>
                       </div>
-                      {positions.map((pos, i) => {
-                        // Use Binance price for positions matching the selected slab, otherwise use oracle price
-                        const isSelectedSlab = selectedSlab && pos.slab.equals(selectedSlab);
-                        const displayMarkPrice = isSelectedSlab && binancePrice
-                          ? binancePrice
-                          : (pos.markPrice.toNumber() / 1e6);
-
-                        // Recalculate PnL with Binance price if applicable
-                        // PnL = price_diff × quantity × leverage (leveraged exposure)
-                        const displayPnl = isSelectedSlab && binancePrice
-                          ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6) * pos.leverage)
-                          : (pos.unrealizedPnl.toNumber() / 1e6);
-
-                        // Calculate notional size (quantity × leverage × mark price)
-                        // This shows the leveraged exposure, not just the base quantity
-                        const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * pos.leverage * displayMarkPrice);
-
-                        return (
-                          <div key={i} className="grid grid-cols-7 gap-2 text-sm py-2 border-b border-border/10 hover:bg-secondary/10 transition-colors">
-                            <div className="font-medium text-white">{pos.instrumentSymbol}</div>
-                            <div className={`text-right font-mono ${pos.quantity.isNeg() ? 'text-red-400' : 'text-emerald-400'}`}>
-                              ${notionalSize.toFixed(2)}
-                            </div>
-                            <div className="text-right text-white font-mono">${(pos.avgEntryPrice.toNumber() / 1e6).toFixed(2)}</div>
-                            <div className="text-right text-white font-mono">${displayMarkPrice.toFixed(2)}</div>
-                            <div className={`text-right font-mono ${displayPnl < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                              ${displayPnl.toFixed(2)}
-                            </div>
-                            <div className="text-right text-white">{pos.leverage.toFixed(1)}x</div>
-                            <div className="text-right">
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => handleClosePosition(i)}
-                                disabled={closingPosition === i || isExecuting}
-                                className="h-7 text-xs px-2"
-                              >
-                                {closingPosition === i ? 'Closing...' : 'Close'}
-                              </Button>
-                            </div>
+                      {positionRows.map(({ pos, displayMarkPrice, displayPnl, notionalSize, entryPrice, leverage }, i) => (
+                        <div key={i} className="grid grid-cols-7 gap-2 text-sm py-2 border-b border-border/10 hover:bg-secondary/10 transition-colors">
+                          <div className="font-medium text-white">{pos.instrumentSymbol}</div>
+                          <div className={`text-right font-mono ${pos.quantity.isNeg() ? 'text-red-400' : 'text-emerald-400'}`}>
+                            ${notionalSize.toFixed(2)}
                           </div>
-                        );
-                      })}
+                          <div className="text-right text-white font-mono">${entryPrice.toFixed(2)}</div>
+                          <div className="text-right text-white font-mono">${displayMarkPrice.toFixed(2)}</div>
+                          <div className={`text-right font-mono ${displayPnl < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                            ${displayPnl.toFixed(2)}
+                          </div>
+                          <div className="text-right text-white">{leverage.toFixed(1)}x</div>
+                          <div className="text-right">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleClosePosition(i)}
+                              disabled={closingPosition === i || isExecuting}
+                              className="h-7 text-xs px-2"
+                            >
+                              {closingPosition === i ? 'Closing...' : 'Close'}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </TabsContent>
