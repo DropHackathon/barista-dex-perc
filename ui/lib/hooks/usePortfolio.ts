@@ -209,21 +209,45 @@ export function usePortfolio(): PortfolioData {
         });
       }
 
-      const totalEquity = equity.add(totalUnrealizedPnl);
-      const freeCollateral = totalEquity.sub(initialMargin);
+      const freeCollateral = equity.sub(initialMargin);
       const marginRatio = initialMargin.isZero()
         ? 0
-        : totalEquity.mul(new BN(10000)).div(initialMargin).toNumber() / 100;
+        : equity.mul(new BN(10000)).div(initialMargin).toNumber() / 100;
 
       // Only update state if values have changed to prevent flickering
       setPositions((prev) => {
-        if (JSON.stringify(prev) === JSON.stringify(positionsWithMetrics)) return prev;
+        // Check if positions are the same (compare only core position fields, not derived values like mark price or PnL)
+        if (prev.length !== positionsWithMetrics.length) return positionsWithMetrics;
+
+        const same = prev.every((p, i) => {
+          const n = positionsWithMetrics[i];
+          return (
+            p.slab.equals(n.slab) &&
+            p.instrument.equals(n.instrument) &&
+            p.instrumentSymbol === n.instrumentSymbol &&
+            p.quantity.eq(n.quantity) &&
+            p.avgEntryPrice.eq(n.avgEntryPrice) &&
+            p.leverage === n.leverage
+            // Don't compare markPrice or unrealizedPnl - they change frequently from price updates
+          );
+        });
+
+        // If core position hasn't changed, update only the derived fields without triggering re-render
+        if (same) {
+          // Mutate the previous positions array in place to update mark price and PnL
+          prev.forEach((p, i) => {
+            p.markPrice = positionsWithMetrics[i].markPrice;
+            p.unrealizedPnl = positionsWithMetrics[i].unrealizedPnl;
+          });
+          return prev;
+        }
+
         return positionsWithMetrics;
       });
 
       setSummary((prev) => {
         const newSummary = {
-          equity: totalEquity,
+          equity, // Raw portfolio equity balance (no unrealized PnL added)
           initialMargin,
           maintenanceMargin,
           freeCollateral,
