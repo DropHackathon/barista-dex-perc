@@ -495,18 +495,11 @@ pub fn process_execute_cross_slab(
             let quantity_abs = filled_qty.abs() as u128;
             let leverage_u128 = leverage as u128;
 
-            // Margin = quantity * 10_000 / leverage
+            // Margin = quantity * 1_000 / leverage
             // quantity is in 1e6 micro-units, we want margin in lamports (1e9 scale)
-            // For 10 units (10_000_000 micro-units) at 1x: margin = 10_000_000 * 10_000 / 1 = 100_000_000_000 lamports = 100 SOL
-            // Wait, that's 10x too much. Let me recalculate:
-            // 10 contracts should require 10 SOL margin = 10_000_000_000 lamports
-            // quantity = 10_000_000 micro-units
-            // margin = 10_000_000_000 lamports
-            // So: margin = quantity * 1_000 / leverage? No, that gives 10_000_000 * 1_000 = 10_000_000_000 ✓
-            // But user reports this is only deducting 1 SOL, so formula is giving 1_000_000_000 instead of 10_000_000_000
-            // Current: 10_000_000 * 1_000 / 1 = 10_000_000_000 (should be correct but isn't)
-            // Actual need: multiply by 10 more = * 10_000
-            let margin_lamports = (quantity_abs * 10_000) / leverage_u128;
+            // For 10 contracts (10_000_000 micro-units) at 1x leverage:
+            //   margin = 10_000_000 * 1_000 / 1 = 10_000_000_000 lamports = 10 SOL ✓
+            let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
 
             // Debug: Log the margin calculation components
             sol_log_64(quantity_abs as u64, leverage_u128 as u64, margin_lamports as u64, vwap_px as u64, order_type as u64);
