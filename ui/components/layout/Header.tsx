@@ -128,7 +128,7 @@ export function Header() {
         {/* Known Bugs Button */}
         <button
           onClick={() => setShowBugsModal(true)}
-          className="p-1.5 rounded text-white/50 hover:text-white transition-colors"
+          className="p-1.5 rounded text-yellow-400 hover:text-yellow-300 transition-colors"
           title="Known Bugs & Limitations"
         >
           <AlertCircle className="h-4 w-4" />
