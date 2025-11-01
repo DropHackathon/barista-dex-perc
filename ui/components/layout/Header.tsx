@@ -15,7 +15,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { truncateAddress, formatSol } from '@/lib/utils';
-import { Wallet, LogOut, Plus, Copy, Check } from 'lucide-react';
+import { Wallet, LogOut, Plus, Copy, Check, AlertCircle } from 'lucide-react';
 import BN from 'bn.js';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
@@ -25,6 +25,7 @@ export function Header() {
   const { summary } = usePortfolio();
   const [showLocalnetModal, setShowLocalnetModal] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showBugsModal, setShowBugsModal] = useState(false);
   const [depositAmount, setDepositAmount] = useState('10');
   const [isDepositing, setIsDepositing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -123,6 +124,15 @@ export function Header() {
             Trade
           </a>
         </nav>
+
+        {/* Known Bugs Button */}
+        <button
+          onClick={() => setShowBugsModal(true)}
+          className="p-1.5 rounded text-white/50 hover:text-white transition-colors"
+          title="Known Bugs & Limitations"
+        >
+          <AlertCircle className="h-4 w-4" />
+        </button>
 
         {/* Wallet Button */}
         <div className="flex items-center space-x-1.5">
@@ -290,6 +300,101 @@ export function Header() {
               className="bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20"
             >
               {isDepositing ? 'Depositing...' : `Deposit ${depositAmount} SOL`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Known Bugs & Limitations Dialog */}
+      <Dialog open={showBugsModal} onOpenChange={setShowBugsModal}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Known Bugs & Limitations</DialogTitle>
+            <DialogDescription>
+              Current issues and limitations in Barista DEX
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+            {/* Critical Bugs */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-red-400">Critical Issues</h3>
+              <ul className="space-y-2 text-xs text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="text-red-400">•</span>
+                  <span>None currently identified</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Known Limitations */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-yellow-400">Limitations</h3>
+              <ul className="space-y-2 text-xs text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="text-yellow-400">•</span>
+                  <span><strong>No Liquidations:</strong> Liquidation mechanism is not currently implemented</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-yellow-400">•</span>
+                  <span><strong>Single Instrument:</strong> Only one trading pair supported per slab</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-yellow-400">•</span>
+                  <span><strong>Leverage Range:</strong> Supports 1x-10x leverage only</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-yellow-400">•</span>
+                  <span><strong>Localnet Only:</strong> Currently configured for local development only</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Minor Issues */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-blue-400">Minor Issues</h3>
+              <ul className="space-y-2 text-xs text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="text-blue-400">•</span>
+                  <span><strong>Mean Leverage Display:</strong> Spot trades (1x) do not properly aggregate mean leverage when leveraged trades are added to the position</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-400">•</span>
+                  <span><strong>UI Polling:</strong> Portfolio data refreshes every 5 seconds (may show brief stale data)</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-400">•</span>
+                  <span><strong>Price Updates:</strong> Mark prices update on-chain only, not real-time from oracle</span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Recent Fixes */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-emerald-400">Recently Fixed</h3>
+              <ul className="space-y-2 text-xs text-muted-foreground">
+                <li className="flex gap-2">
+                  <span className="text-emerald-400">✓</span>
+                  <span><strong>1x Leverage:</strong> Fixed insufficient margin error for 1x leverage trades</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-emerald-400">✓</span>
+                  <span><strong>Position Reversal:</strong> Fixed margin calculation when flipping long/short</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-emerald-400">✓</span>
+                  <span><strong>PnL Calculation:</strong> Corrected leverage multiplier in unrealized PnL</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={() => setShowBugsModal(false)}
+              className="bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20"
+            >
+              Close
             </Button>
           </div>
         </DialogContent>

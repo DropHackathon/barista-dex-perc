@@ -147,9 +147,10 @@ export function usePortfolio(): PortfolioData {
 
             // Calculate aggregate leverage: (quantity × 10_000) / margin_held
             // This gives the effective leverage across all trades
-            const notionalLamports = exposure.positionQty.abs().mul(new BN(10_000));
+            // For 1x leverage, use stored value since margin calculation differs
             let leverage = storedLeverage; // fallback
-            if (marginHeld.gt(new BN(0))) {
+            if (marginHeld.gt(new BN(0)) && storedLeverage !== 1) {
+              const notionalLamports = exposure.positionQty.abs().mul(new BN(10_000));
               leverage = notionalLamports.mul(new BN(100)).div(marginHeld).toNumber() / 100;
               console.log('[DEBUG] Leverage calc:', {
                 quantity: exposure.positionQty.toString(),
