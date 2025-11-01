@@ -116,9 +116,10 @@ export function usePortfolio(): PortfolioData {
               }
             }
 
-            // Fetch PositionDetails PDA for entry price and margin
+            // Fetch PositionDetails PDA for entry price, margin, and leverage
             let entryPrice = new BN(0);
             let marginHeld = new BN(0);
+            let storedLeverage = 1;
             try {
               const portfolioAddress = await client.router?.derivePortfolioAddress(publicKey);
               if (portfolioAddress && client.router) {
@@ -133,27 +134,38 @@ export function usePortfolio(): PortfolioData {
                   const data = positionDetailsAccount.data;
                   const entryPriceOffset = 48;
                   const marginHeldOffset = 112;
+                  const leverageOffset = 128;
 
                   entryPrice = new BN(data.readBigInt64LE(entryPriceOffset).toString());
                   marginHeld = new BN(data.readBigInt64LE(marginHeldOffset).toString());
+                  storedLeverage = data.readUInt8(leverageOffset); // Read leverage from PDA
                 }
               }
             } catch (err) {
               // Position details not found - likely a new position
             }
 
-            // Calculate unrealized PnL
+            // Calculate aggregate leverage: (quantity × 10_000) / margin_held
+            // This gives the effective leverage across all trades
+            const notionalLamports = exposure.positionQty.abs().mul(new BN(10_000));
+            let leverage = storedLeverage; // fallback
+            if (marginHeld.gt(new BN(0))) {
+              leverage = notionalLamports.mul(new BN(100)).div(marginHeld).toNumber() / 100;
+              console.log('[DEBUG] Leverage calc:', {
+                quantity: exposure.positionQty.toString(),
+                notional: notionalLamports.toString(),
+                marginHeld: marginHeld.toString(),
+                storedLeverage,
+                calculatedLeverage: leverage
+              });
+            }
+
+            // Calculate unrealized PnL (including leverage multiplier)
+            // PnL = price_diff × quantity × leverage
             let unrealizedPnl = new BN(0);
             if (!markPrice.isZero() && !entryPrice.isZero()) {
               const priceDiff = markPrice.sub(entryPrice);
-              unrealizedPnl = exposure.positionQty.mul(priceDiff).div(new BN(1_000_000));
-            }
-
-            // Calculate leverage from actual margin held (same as CLI)
-            const notionalLamports = exposure.positionQty.abs().mul(new BN(1_000));
-            let leverage = 1;
-            if (marginHeld.gt(new BN(0))) {
-              leverage = notionalLamports.mul(new BN(100)).div(marginHeld).toNumber() / 100;
+              unrealizedPnl = exposure.positionQty.mul(priceDiff).mul(new BN(leverage)).div(new BN(1_000_000));
             }
 
             // Get instrument metadata

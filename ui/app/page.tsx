@@ -209,10 +209,10 @@ export default function TradePage() {
       });
 
       if (result.success) {
-        // Calculate PnL with Binance price if available
+        // Calculate PnL with Binance price if available (including leverage)
         const isSelectedSlab = selectedSlab && pos.slab.equals(selectedSlab);
         const pnl = isSelectedSlab && binancePrice
-          ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6))
+          ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6) * pos.leverage)
           : (pos.unrealizedPnl.toNumber() / 1e6);
 
         // Record closing trade in history with PnL
@@ -365,12 +365,14 @@ export default function TradePage() {
                           : (pos.markPrice.toNumber() / 1e6);
 
                         // Recalculate PnL with Binance price if applicable
+                        // PnL = price_diff × quantity × leverage (leveraged exposure)
                         const displayPnl = isSelectedSlab && binancePrice
-                          ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6))
+                          ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6) * pos.leverage)
                           : (pos.unrealizedPnl.toNumber() / 1e6);
 
-                        // Calculate notional size (quantity × mark price)
-                        const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * displayMarkPrice);
+                        // Calculate notional size (quantity × leverage × mark price)
+                        // This shows the leveraged exposure, not just the base quantity
+                        const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * pos.leverage * displayMarkPrice);
 
                         return (
                           <div key={i} className="grid grid-cols-7 gap-2 text-sm py-2 border-b border-border/10 hover:bg-secondary/10 transition-colors">
@@ -628,11 +630,11 @@ export default function TradePage() {
               ? binancePrice
               : (pos.markPrice.toNumber() / 1e6);
             const displayPnl = isSelectedSlab && binancePrice
-              ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6))
+              ? ((binancePrice - (pos.avgEntryPrice.toNumber() / 1e6)) * (pos.quantity.toNumber() / 1e6) * pos.leverage)
               : (pos.unrealizedPnl.toNumber() / 1e6);
 
-            // Calculate notional size for dialog
-            const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * displayMarkPrice);
+            // Calculate notional size for dialog (quantity × leverage × mark price)
+            const notionalSize = Math.abs((pos.quantity.toNumber() / 1e6) * pos.leverage * displayMarkPrice);
 
             return (
               <div className="space-y-3">
