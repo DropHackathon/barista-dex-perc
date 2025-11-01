@@ -29,7 +29,6 @@ Cargo.lock
 
 # Node/NPM (if used for tooling)
 node_modules/
-package-lock.json
 *.log
 npm-debug.log*
 
@@ -51,30 +50,6 @@ desktop.ini
 # Test outputs
 *.profraw
 *.profdata
-
-# Solana keys (security)
-*.json
-!Cargo.json
-!**/test-fixtures/**/*.json
-!sbf-solana-solana.json
-!Surfpool.toml
-!sdk/package.json
-!sdk/package-lock.json
-!sdk/tsconfig.json
-!cli-client/package.json
-!cli-client/package-lock.json
-!cli-client/tsconfig.json
-!cli-client/jest.config.js
-!cli-dlp/package.json
-!cli-dlp/package-lock.json
-!cli-dlp/tsconfig.json
-!cli-dlp/jest.config.js
-!ui/package.json
-!ui/pnpm-lock.yaml
-!ui/tsconfig.json
-!ui/next.config.ts
-!ui/postcss.config.mjs
-!ui/eslint.config.mjs
 
 # Local configuration
 .env

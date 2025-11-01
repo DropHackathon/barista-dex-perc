@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -1435,6 +1468,217 @@ class RouterClient {
             dlpOwner, // Required for v0.5 PnL settlement
         };
         return await this.buildExecuteCrossSlabInstruction(user, [split], orderType, leverage);
+    }
+    // ============================================================================
+    // High-Level Trading Methods
+    // ============================================================================
+    /**
+     * Execute a market buy order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to buy (in instrument units, 6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    async marketBuy(slab, quantity, leverage = 1, oracle) {
+        if (!this.wallet) {
+            throw new Error('Wallet required for trading');
+        }
+        const user = this.wallet.publicKey;
+        // Validate leverage
+        if (leverage < 1 || leverage > 10) {
+            throw new Error('Leverage must be between 1 and 10');
+        }
+        // Get oracle price for market order
+        const oracleAccount = oracle || await this.getOracleForSlab(slab);
+        if (!oracleAccount) {
+            throw new Error(`Oracle not found for slab ${slab.toBase58()}`);
+        }
+        const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
+        if (!oracleAccountInfo) {
+            throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+        }
+        // Parse oracle price
+        const priceData = oracleAccountInfo.data;
+        let oraclePrice;
+        if (priceData.length === 128) {
+            oraclePrice = new bn_js_1.default(priceData.readBigInt64LE(80).toString());
+        }
+        else if (priceData.length >= 216) {
+            oraclePrice = new bn_js_1.default(priceData.readBigInt64LE(208).toString());
+        }
+        else {
+            throw new Error(`Invalid oracle data length: ${priceData.length}`);
+        }
+        // Validate position
+        const validation = await this.validateLeveragedPosition(user, quantity, oraclePrice, leverage);
+        if (!validation.valid) {
+            throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
+        }
+        // Ensure portfolio exists
+        const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
+        // Build buy instruction with leveraged quantity
+        const { instruction: buyIx, receiptSetup, receiptKeypair } = await this.buildBuyInstruction(user, slab, validation.actualQuantity, oraclePrice, oracleAccount, router_1.ExecutionType.Market, leverage);
+        // Create transaction
+        const { Transaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const transaction = new Transaction();
+        // Add portfolio initialization if needed
+        for (const ix of ensurePortfolioIxs) {
+            transaction.add(ix);
+        }
+        // Add receipt setup and buy instruction
+        transaction.add(receiptSetup);
+        transaction.add(buyIx);
+        // Send and confirm
+        const { sendAndConfirmTransaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const signature = await sendAndConfirmTransaction(this.connection, transaction, [this.wallet, receiptKeypair], { commitment: 'confirmed' });
+        return signature;
+    }
+    /**
+     * Execute a market sell order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to sell (in instrument units, 6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    async marketSell(slab, quantity, leverage = 1, oracle) {
+        if (!this.wallet) {
+            throw new Error('Wallet required for trading');
+        }
+        const user = this.wallet.publicKey;
+        // Validate leverage
+        if (leverage < 1 || leverage > 10) {
+            throw new Error('Leverage must be between 1 and 10');
+        }
+        // Get oracle price for market order
+        const oracleAccount = oracle || await this.getOracleForSlab(slab);
+        if (!oracleAccount) {
+            throw new Error(`Oracle not found for slab ${slab.toBase58()}`);
+        }
+        const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
+        if (!oracleAccountInfo) {
+            throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+        }
+        // Parse oracle price
+        const priceData = oracleAccountInfo.data;
+        let oraclePrice;
+        if (priceData.length === 128) {
+            oraclePrice = new bn_js_1.default(priceData.readBigInt64LE(80).toString());
+        }
+        else if (priceData.length >= 216) {
+            oraclePrice = new bn_js_1.default(priceData.readBigInt64LE(208).toString());
+        }
+        else {
+            throw new Error(`Invalid oracle data length: ${priceData.length}`);
+        }
+        // Validate position
+        const validation = await this.validateLeveragedPosition(user, quantity, oraclePrice, leverage);
+        if (!validation.valid) {
+            throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
+        }
+        // Ensure portfolio exists
+        const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
+        // Build sell instruction with leveraged quantity
+        const { instruction: sellIx, receiptSetup, receiptKeypair } = await this.buildSellInstruction(user, slab, validation.actualQuantity, oraclePrice, oracleAccount, router_1.ExecutionType.Market, leverage);
+        // Create transaction
+        const { Transaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const transaction = new Transaction();
+        // Add portfolio initialization if needed
+        for (const ix of ensurePortfolioIxs) {
+            transaction.add(ix);
+        }
+        // Add receipt setup and sell instruction
+        transaction.add(receiptSetup);
+        transaction.add(sellIx);
+        // Send and confirm
+        const { sendAndConfirmTransaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const signature = await sendAndConfirmTransaction(this.connection, transaction, [this.wallet, receiptKeypair], { commitment: 'confirmed' });
+        return signature;
+    }
+    /**
+     * Execute a limit buy order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to buy (in instrument units, 6 decimals)
+     * @param limitPrice Limit price (6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    async limitBuy(slab, quantity, limitPrice, leverage = 1, oracle) {
+        if (!this.wallet) {
+            throw new Error('Wallet required for trading');
+        }
+        const user = this.wallet.publicKey;
+        // Validate leverage
+        if (leverage < 1 || leverage > 10) {
+            throw new Error('Leverage must be between 1 and 10');
+        }
+        // Validate position
+        const validation = await this.validateLeveragedPosition(user, quantity, limitPrice, leverage);
+        if (!validation.valid) {
+            throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
+        }
+        // Ensure portfolio exists
+        const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
+        // Build buy instruction with leveraged quantity
+        const { instruction: buyIx, receiptSetup, receiptKeypair } = await this.buildBuyInstruction(user, slab, validation.actualQuantity, limitPrice, oracle, router_1.ExecutionType.Limit, leverage);
+        // Create transaction
+        const { Transaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const transaction = new Transaction();
+        // Add portfolio initialization if needed
+        for (const ix of ensurePortfolioIxs) {
+            transaction.add(ix);
+        }
+        // Add receipt setup and buy instruction
+        transaction.add(receiptSetup);
+        transaction.add(buyIx);
+        // Send and confirm
+        const { sendAndConfirmTransaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const signature = await sendAndConfirmTransaction(this.connection, transaction, [this.wallet, receiptKeypair], { commitment: 'confirmed' });
+        return signature;
+    }
+    /**
+     * Execute a limit sell order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to sell (in instrument units, 6 decimals)
+     * @param limitPrice Limit price (6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    async limitSell(slab, quantity, limitPrice, leverage = 1, oracle) {
+        if (!this.wallet) {
+            throw new Error('Wallet required for trading');
+        }
+        const user = this.wallet.publicKey;
+        // Validate leverage
+        if (leverage < 1 || leverage > 10) {
+            throw new Error('Leverage must be between 1 and 10');
+        }
+        // Validate position
+        const validation = await this.validateLeveragedPosition(user, quantity, limitPrice, leverage);
+        if (!validation.valid) {
+            throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
+        }
+        // Ensure portfolio exists
+        const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
+        // Build sell instruction with leveraged quantity
+        const { instruction: sellIx, receiptSetup, receiptKeypair } = await this.buildSellInstruction(user, slab, validation.actualQuantity, limitPrice, oracle, router_1.ExecutionType.Limit, leverage);
+        // Create transaction
+        const { Transaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const transaction = new Transaction();
+        // Add portfolio initialization if needed
+        for (const ix of ensurePortfolioIxs) {
+            transaction.add(ix);
+        }
+        // Add receipt setup and sell instruction
+        transaction.add(receiptSetup);
+        transaction.add(sellIx);
+        // Send and confirm
+        const { sendAndConfirmTransaction } = await Promise.resolve().then(() => __importStar(require('@solana/web3.js')));
+        const signature = await sendAndConfirmTransaction(this.connection, transaction, [this.wallet, receiptKeypair], { commitment: 'confirmed' });
+        return signature;
     }
 }
 exports.RouterClient = RouterClient;

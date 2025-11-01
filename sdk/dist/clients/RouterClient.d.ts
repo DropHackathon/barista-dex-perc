@@ -366,4 +366,42 @@ export declare class RouterClient {
         receiptSetup: TransactionInstruction;
         receiptKeypair: Keypair;
     }>;
+    /**
+     * Execute a market buy order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to buy (in instrument units, 6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    marketBuy(slab: PublicKey, quantity: BN, leverage?: number, oracle?: PublicKey): Promise<string>;
+    /**
+     * Execute a market sell order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to sell (in instrument units, 6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    marketSell(slab: PublicKey, quantity: BN, leverage?: number, oracle?: PublicKey): Promise<string>;
+    /**
+     * Execute a limit buy order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to buy (in instrument units, 6 decimals)
+     * @param limitPrice Limit price (6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    limitBuy(slab: PublicKey, quantity: BN, limitPrice: BN, leverage?: number, oracle?: PublicKey): Promise<string>;
+    /**
+     * Execute a limit sell order
+     * @param slab Slab market to trade on
+     * @param quantity Quantity to sell (in instrument units, 6 decimals)
+     * @param limitPrice Limit price (6 decimals)
+     * @param leverage Leverage multiplier (1-10x), defaults to 1
+     * @param oracle Optional oracle public key (auto-fetched if not provided)
+     * @returns Transaction signature
+     */
+    limitSell(slab: PublicKey, quantity: BN, limitPrice: BN, leverage?: number, oracle?: PublicKey): Promise<string>;
 }
