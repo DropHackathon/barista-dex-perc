@@ -495,8 +495,14 @@ pub fn process_execute_cross_slab(
             let quantity_abs = filled_qty.abs() as u128;
             let leverage_u128 = leverage as u128;
 
-            // Margin = (quantity * 10_000) / leverage
-            let margin_lamports = (quantity_abs * 10_000) / leverage_u128;
+            // Different margin calculation for 1x vs higher leverage
+            let margin_lamports = if leverage == 1 {
+                // For 1x leverage: margin = quantity * 1_000 (1 contract = 1 SOL)
+                quantity_abs * 1_000
+            } else {
+                // For higher leverage: margin = (quantity * 10_000) / leverage
+                (quantity_abs * 10_000) / leverage_u128
+            };
 
             // Debug: Log the margin calculation components
             sol_log_64(quantity_abs as u64, leverage_u128 as u64, margin_lamports as u64, vwap_px as u64, order_type as u64);
@@ -657,8 +663,14 @@ pub fn process_execute_cross_slab(
                 let leverage_u128 = leverage as u128;
                 let remaining_qty_u128 = remaining_qty_abs as u128;
 
-                // Margin = (quantity * 10_000) / leverage
-                let new_margin = (remaining_qty_u128 * 10_000) / leverage_u128;
+                // Different margin calculation for 1x vs higher leverage
+                let new_margin = if leverage == 1 {
+                    // For 1x leverage: margin = quantity * 1_000 (1 contract = 1 SOL)
+                    remaining_qty_u128 * 1_000
+                } else {
+                    // For higher leverage: margin = (quantity * 10_000) / leverage
+                    (remaining_qty_u128 * 10_000) / leverage_u128
+                };
 
                 msg!("MARGIN DEBUG: Opening reversed - remaining_qty, leverage, new_margin");
                 sol_log_64(remaining_qty_abs as u64, leverage as u64, new_margin as u64, 0, 0);
