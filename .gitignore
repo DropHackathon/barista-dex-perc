@@ -69,6 +69,12 @@ desktop.ini
 !cli-dlp/package-lock.json
 !cli-dlp/tsconfig.json
 !cli-dlp/jest.config.js
+!ui/package.json
+!ui/pnpm-lock.yaml
+!ui/tsconfig.json
+!ui/next.config.ts
+!ui/postcss.config.mjs
+!ui/eslint.config.mjs
 
 # Local configuration
 .env
