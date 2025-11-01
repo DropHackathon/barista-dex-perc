@@ -495,11 +495,8 @@ pub fn process_execute_cross_slab(
             let quantity_abs = filled_qty.abs() as u128;
             let leverage_u128 = leverage as u128;
 
-            // Margin = quantity * 1_000 / leverage
-            // quantity is in 1e6 micro-units, we want margin in lamports (1e9 scale)
-            // For 10 contracts (10_000_000 micro-units) at 1x leverage:
-            //   margin = 10_000_000 * 1_000 / 1 = 10_000_000_000 lamports = 10 SOL ✓
-            let margin_lamports = (quantity_abs * 1_000) / leverage_u128;
+            // Margin = (quantity * 10_000) / leverage
+            let margin_lamports = (quantity_abs * 10_000) / leverage_u128;
 
             // Debug: Log the margin calculation components
             sol_log_64(quantity_abs as u64, leverage_u128 as u64, margin_lamports as u64, vwap_px as u64, order_type as u64);
@@ -656,11 +653,11 @@ pub fn process_execute_cross_slab(
                     bump,
                 )?;
 
-                // Initialize new position with margin based on leverage
+                // Initialize new position with margin
                 let leverage_u128 = leverage as u128;
                 let remaining_qty_u128 = remaining_qty_abs as u128;
 
-                // Margin = quantity * 10_000 / leverage
+                // Margin = (quantity * 10_000) / leverage
                 let new_margin = (remaining_qty_u128 * 10_000) / leverage_u128;
 
                 msg!("MARGIN DEBUG: Opening reversed - remaining_qty, leverage, new_margin");

@@ -197,7 +197,8 @@ impl PositionDetails {
         // exit_price = micro-USD/SOL
         // pnl_SOL = micro^2-USD / micro-USD/SOL = micro-SOL
         // Then multiply by 1000 to convert from micro-SOL to lamports (1e6 -> 1e9)
-        let pnl = (pnl_usd_raw / (exit_price as i128)) * 1_000;
+        // Then multiply by leverage to get actual PnL on leveraged position
+        let pnl = (pnl_usd_raw / (exit_price as i128)) * 1_000 * (self.leverage as i128);
 
         self.realized_pnl = self.realized_pnl.saturating_add(pnl);
         self.total_fees = self.total_fees.saturating_add(fee);
