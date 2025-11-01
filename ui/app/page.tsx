@@ -118,9 +118,9 @@ export default function TradePage() {
       }
     }
 
+    const leverageNum = parseFloat(leverage);
     const quantityBN = new BN(parseFloat(quantity) * 1e6); // Convert to 6 decimals
     const priceBN = price ? new BN(parseFloat(price) * 1e6) : undefined;
-    const leverageNum = parseFloat(leverage);
 
     // Get selected market to access oracle
     const selectedMarket = markets.find(m => m.slab.equals(selectedSlab));
