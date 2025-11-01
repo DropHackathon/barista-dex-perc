@@ -1920,9 +1920,9 @@ export class RouterClient {
 
     const user = this.wallet.publicKey;
 
-    // Validate leverage
-    if (leverage < 1 || leverage > 10) {
-      throw new Error('Leverage must be between 1 and 10');
+    // Validate leverage (0 means closing position, skip validation)
+    if (leverage !== 0 && (leverage < 1 || leverage > 10)) {
+      throw new Error('Leverage must be between 1 and 10, or 0 to close position');
     }
 
     // Get oracle price for market order
@@ -1932,12 +1932,16 @@ export class RouterClient {
     }
 
     const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
-    if (!oracleAccountInfo) {
-      throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+    if (!oracleAccountInfo || !oracleAccountInfo.data) {
+      throw new Error(`Oracle account not found or has no data: ${oracleAccount.toBase58()}`);
     }
 
     // Parse oracle price
     const priceData = oracleAccountInfo.data;
+    if (!priceData || priceData.length === 0) {
+      throw new Error(`Oracle account has no data: ${oracleAccount.toBase58()}`);
+    }
+
     let oraclePrice: BN;
 
     if (priceData.length === 128) {
@@ -1948,11 +1952,8 @@ export class RouterClient {
       throw new Error(`Invalid oracle data length: ${priceData.length}`);
     }
 
-    // Validate position
-    const validation = await this.validateLeveragedPosition(user, quantity, oraclePrice, leverage);
-    if (!validation.valid) {
-      throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
-    }
+    // Skip client-side equity validation - let the program handle it with proper netting
+    // The program correctly accounts for position netting when calculating margin requirements
 
     // Ensure portfolio exists
     const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
@@ -1961,7 +1962,7 @@ export class RouterClient {
     const { instruction: buyIx, receiptSetup, receiptKeypair } = await this.buildBuyInstruction(
       user,
       slab,
-      validation.actualQuantity,
+      quantity,
       oraclePrice,
       oracleAccount,
       ExecutionType.Market,
@@ -1981,16 +1982,36 @@ export class RouterClient {
     transaction.add(receiptSetup);
     transaction.add(buyIx);
 
-    // Send and confirm
-    const { sendAndConfirmTransaction } = await import('@solana/web3.js');
-    const signature = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      [this.wallet, receiptKeypair],
-      { commitment: 'confirmed' }
-    );
+    // Get recent blockhash
+    const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = user;
 
-    return signature;
+    // Sign and send transaction
+    // Support both Keypair (has secretKey) and Wallet Adapter (has signTransaction)
+    if ('signTransaction' in this.wallet && typeof this.wallet.signTransaction === 'function') {
+      // Wallet Adapter path
+      // Important: Wallet signs first, then receipt keypair signs after
+      const signedByWallet = await this.wallet.signTransaction(transaction);
+      signedByWallet.partialSign(receiptKeypair);
+      const rawTransaction = signedByWallet.serialize();
+      const signature = await this.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed'
+      });
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    } else {
+      // Keypair path (CLI/testing)
+      const { sendAndConfirmTransaction } = await import('@solana/web3.js');
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [this.wallet, receiptKeypair],
+        { commitment: 'confirmed' }
+      );
+      return signature;
+    }
   }
 
   /**
@@ -2013,9 +2034,9 @@ export class RouterClient {
 
     const user = this.wallet.publicKey;
 
-    // Validate leverage
-    if (leverage < 1 || leverage > 10) {
-      throw new Error('Leverage must be between 1 and 10');
+    // Validate leverage (0 means closing position, skip validation)
+    if (leverage !== 0 && (leverage < 1 || leverage > 10)) {
+      throw new Error('Leverage must be between 1 and 10, or 0 to close position');
     }
 
     // Get oracle price for market order
@@ -2025,12 +2046,16 @@ export class RouterClient {
     }
 
     const oracleAccountInfo = await this.connection.getAccountInfo(oracleAccount);
-    if (!oracleAccountInfo) {
-      throw new Error(`Oracle account not found: ${oracleAccount.toBase58()}`);
+    if (!oracleAccountInfo || !oracleAccountInfo.data) {
+      throw new Error(`Oracle account not found or has no data: ${oracleAccount.toBase58()}`);
     }
 
     // Parse oracle price
     const priceData = oracleAccountInfo.data;
+    if (!priceData || priceData.length === 0) {
+      throw new Error(`Oracle account has no data: ${oracleAccount.toBase58()}`);
+    }
+
     let oraclePrice: BN;
 
     if (priceData.length === 128) {
@@ -2041,11 +2066,8 @@ export class RouterClient {
       throw new Error(`Invalid oracle data length: ${priceData.length}`);
     }
 
-    // Validate position
-    const validation = await this.validateLeveragedPosition(user, quantity, oraclePrice, leverage);
-    if (!validation.valid) {
-      throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
-    }
+    // Skip client-side equity validation - let the program handle it with proper netting
+    // The program correctly accounts for position netting when calculating margin requirements
 
     // Ensure portfolio exists
     const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
@@ -2054,7 +2076,7 @@ export class RouterClient {
     const { instruction: sellIx, receiptSetup, receiptKeypair } = await this.buildSellInstruction(
       user,
       slab,
-      validation.actualQuantity,
+      quantity,
       oraclePrice,
       oracleAccount,
       ExecutionType.Market,
@@ -2074,16 +2096,36 @@ export class RouterClient {
     transaction.add(receiptSetup);
     transaction.add(sellIx);
 
-    // Send and confirm
-    const { sendAndConfirmTransaction } = await import('@solana/web3.js');
-    const signature = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      [this.wallet, receiptKeypair],
-      { commitment: 'confirmed' }
-    );
+    // Get recent blockhash
+    const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = user;
 
-    return signature;
+    // Sign and send transaction
+    // Support both Keypair (has secretKey) and Wallet Adapter (has signTransaction)
+    if ('signTransaction' in this.wallet && typeof this.wallet.signTransaction === 'function') {
+      // Wallet Adapter path
+      // Important: Wallet signs first, then receipt keypair signs after
+      const signedByWallet = await this.wallet.signTransaction(transaction);
+      signedByWallet.partialSign(receiptKeypair);
+      const rawTransaction = signedByWallet.serialize();
+      const signature = await this.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed'
+      });
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    } else {
+      // Keypair path (CLI/testing)
+      const { sendAndConfirmTransaction } = await import('@solana/web3.js');
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [this.wallet, receiptKeypair],
+        { commitment: 'confirmed' }
+      );
+      return signature;
+    }
   }
 
   /**
@@ -2108,16 +2150,13 @@ export class RouterClient {
 
     const user = this.wallet.publicKey;
 
-    // Validate leverage
-    if (leverage < 1 || leverage > 10) {
-      throw new Error('Leverage must be between 1 and 10');
+    // Validate leverage (0 means closing position, skip validation)
+    if (leverage !== 0 && (leverage < 1 || leverage > 10)) {
+      throw new Error('Leverage must be between 1 and 10, or 0 to close position');
     }
 
-    // Validate position
-    const validation = await this.validateLeveragedPosition(user, quantity, limitPrice, leverage);
-    if (!validation.valid) {
-      throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
-    }
+    // Skip client-side equity validation - let the program handle it with proper netting
+    // The program correctly accounts for position netting when calculating margin requirements
 
     // Ensure portfolio exists
     const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
@@ -2126,7 +2165,7 @@ export class RouterClient {
     const { instruction: buyIx, receiptSetup, receiptKeypair } = await this.buildBuyInstruction(
       user,
       slab,
-      validation.actualQuantity,
+      quantity,
       limitPrice,
       oracle,
       ExecutionType.Limit,
@@ -2146,16 +2185,36 @@ export class RouterClient {
     transaction.add(receiptSetup);
     transaction.add(buyIx);
 
-    // Send and confirm
-    const { sendAndConfirmTransaction } = await import('@solana/web3.js');
-    const signature = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      [this.wallet, receiptKeypair],
-      { commitment: 'confirmed' }
-    );
+    // Get recent blockhash
+    const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = user;
 
-    return signature;
+    // Sign and send transaction
+    // Support both Keypair (has secretKey) and Wallet Adapter (has signTransaction)
+    if ('signTransaction' in this.wallet && typeof this.wallet.signTransaction === 'function') {
+      // Wallet Adapter path
+      // Important: Wallet signs first, then receipt keypair signs after
+      const signedByWallet = await this.wallet.signTransaction(transaction);
+      signedByWallet.partialSign(receiptKeypair);
+      const rawTransaction = signedByWallet.serialize();
+      const signature = await this.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed'
+      });
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    } else {
+      // Keypair path (CLI/testing)
+      const { sendAndConfirmTransaction } = await import('@solana/web3.js');
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [this.wallet, receiptKeypair],
+        { commitment: 'confirmed' }
+      );
+      return signature;
+    }
   }
 
   /**
@@ -2180,16 +2239,13 @@ export class RouterClient {
 
     const user = this.wallet.publicKey;
 
-    // Validate leverage
-    if (leverage < 1 || leverage > 10) {
-      throw new Error('Leverage must be between 1 and 10');
+    // Validate leverage (0 means closing position, skip validation)
+    if (leverage !== 0 && (leverage < 1 || leverage > 10)) {
+      throw new Error('Leverage must be between 1 and 10, or 0 to close position');
     }
 
-    // Validate position
-    const validation = await this.validateLeveragedPosition(user, quantity, limitPrice, leverage);
-    if (!validation.valid) {
-      throw new Error(`Insufficient equity. Available: ${validation.availableEquity.toString()}, Required: ${validation.marginCommitted.toString()}`);
-    }
+    // Skip client-side equity validation - let the program handle it with proper netting
+    // The program correctly accounts for position netting when calculating margin requirements
 
     // Ensure portfolio exists
     const ensurePortfolioIxs = await this.ensurePortfolioInstructions(user);
@@ -2198,7 +2254,7 @@ export class RouterClient {
     const { instruction: sellIx, receiptSetup, receiptKeypair } = await this.buildSellInstruction(
       user,
       slab,
-      validation.actualQuantity,
+      quantity,
       limitPrice,
       oracle,
       ExecutionType.Limit,
@@ -2218,15 +2274,35 @@ export class RouterClient {
     transaction.add(receiptSetup);
     transaction.add(sellIx);
 
-    // Send and confirm
-    const { sendAndConfirmTransaction } = await import('@solana/web3.js');
-    const signature = await sendAndConfirmTransaction(
-      this.connection,
-      transaction,
-      [this.wallet, receiptKeypair],
-      { commitment: 'confirmed' }
-    );
+    // Get recent blockhash
+    const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = user;
 
-    return signature;
+    // Sign and send transaction
+    // Support both Keypair (has secretKey) and Wallet Adapter (has signTransaction)
+    if ('signTransaction' in this.wallet && typeof this.wallet.signTransaction === 'function') {
+      // Wallet Adapter path
+      // Important: Wallet signs first, then receipt keypair signs after
+      const signedByWallet = await this.wallet.signTransaction(transaction);
+      signedByWallet.partialSign(receiptKeypair);
+      const rawTransaction = signedByWallet.serialize();
+      const signature = await this.connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed'
+      });
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    } else {
+      // Keypair path (CLI/testing)
+      const { sendAndConfirmTransaction } = await import('@solana/web3.js');
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [this.wallet, receiptKeypair],
+        { commitment: 'confirmed' }
+      );
+      return signature;
+    }
   }
 }
