@@ -56,6 +56,7 @@ export function LightweightChart({
   const symbolRef = useRef(symbol);
   const updateIntervalIdRef = useRef<NodeJS.Timeout | null>(null);
   const onPriceUpdateRef = useRef(onPriceUpdate);
+  const positionsRef = useRef(positions);
 
   // Update refs when state changes
   useEffect(() => { intervalRef.current = interval; }, [interval]);
@@ -63,6 +64,7 @@ export function LightweightChart({
   useEffect(() => { showVolumeRef.current = showVolume; }, [showVolume]);
   useEffect(() => { symbolRef.current = symbol; }, [symbol]);
   useEffect(() => { onPriceUpdateRef.current = onPriceUpdate; }, [onPriceUpdate]);
+  useEffect(() => { positionsRef.current = positions; }, [positions]);
 
   // Create chart once on mount
   useEffect(() => {
@@ -298,8 +300,8 @@ export function LightweightChart({
         // Fit content to view
         chart.timeScale().fitContent();
 
-        // Add price lines for positions
-        positions.forEach((position) => {
+        // Add price lines for positions (use ref to get current positions)
+        positionsRef.current.forEach((position) => {
           if (mainSeries && position.entryPrice) {
             mainSeries.createPriceLine({
               price: position.entryPrice,

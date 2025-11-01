@@ -149,12 +149,11 @@ export function usePortfolio(): PortfolioData {
               unrealizedPnl = exposure.positionQty.mul(priceDiff).div(new BN(1_000_000));
             }
 
-            // Calculate leverage
+            // Calculate leverage from actual margin held (same as CLI)
+            const notionalLamports = exposure.positionQty.abs().mul(new BN(1_000));
             let leverage = 1;
-            if (marginHeld.gt(new BN(0)) && !exposure.positionQty.isZero()) {
-              const notionalLamports = exposure.positionQty.abs().mul(new BN(1_000));
-              const leverageBN = notionalLamports.mul(new BN(100)).div(marginHeld);
-              leverage = leverageBN.toNumber() / 100;
+            if (marginHeld.gt(new BN(0))) {
+              leverage = notionalLamports.mul(new BN(100)).div(marginHeld).toNumber() / 100;
             }
 
             // Get instrument metadata
