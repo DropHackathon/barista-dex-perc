@@ -40,6 +40,7 @@ export function LightweightChart({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<any[]>([]);
+  const priceLinesRef = useRef<any[]>([]);
   const loadingRef = useRef(false);
   const dataLoadedRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -185,11 +186,12 @@ export function LightweightChart({
           return;
         }
 
-        // Remove ALL old series
+        // Remove ALL old series and price lines
         seriesRef.current.forEach(series => {
           chart.removeSeries(series);
         });
         seriesRef.current = [];
+        priceLinesRef.current = []; // Clear price lines tracking
 
         // Add appropriate series based on chart type
         let mainSeries: any;
@@ -303,7 +305,7 @@ export function LightweightChart({
         // Add price lines for positions (use ref to get current positions)
         positionsRef.current.forEach((position) => {
           if (mainSeries && position.entryPrice) {
-            mainSeries.createPriceLine({
+            const priceLine = mainSeries.createPriceLine({
               price: position.entryPrice,
               color: position.quantity > 0 ? '#26a69a' : '#ef5350', // Green for long, red for short
               lineWidth: 2,
@@ -311,6 +313,7 @@ export function LightweightChart({
               axisLabelVisible: true,
               title: position.quantity > 0 ? 'Long Entry' : 'Short Entry',
             });
+            priceLinesRef.current.push(priceLine);
           }
         });
 
@@ -350,13 +353,19 @@ export function LightweightChart({
     const mainSeries = seriesRef.current[0];
 
     // Remove all existing price lines
-    // Note: There's no direct API to remove price lines, so we'll need to track them
-    // For now, the lines will accumulate - we need to reload data to clear them
+    priceLinesRef.current.forEach((priceLine) => {
+      try {
+        mainSeries.removePriceLine(priceLine);
+      } catch (e) {
+        // Ignore errors if price line was already removed
+      }
+    });
+    priceLinesRef.current = [];
 
     // Add new price lines for current positions
     positions.forEach((position) => {
       if (position.entryPrice) {
-        mainSeries.createPriceLine({
+        const priceLine = mainSeries.createPriceLine({
           price: position.entryPrice,
           color: position.quantity > 0 ? '#26a69a' : '#ef5350',
           lineWidth: 2,
@@ -364,6 +373,7 @@ export function LightweightChart({
           axisLabelVisible: true,
           title: position.quantity > 0 ? 'Long Entry' : 'Short Entry',
         });
+        priceLinesRef.current.push(priceLine);
       }
     });
   }, [positions]);
