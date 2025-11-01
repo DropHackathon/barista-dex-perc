@@ -9,7 +9,7 @@ import { WalletAdapter } from './types';
  */
 export class LocalnetWalletAdapter implements WalletAdapter {
   mode = 'localnet' as const;
-  private keypair: Keypair | null = null;
+  public keypair: Keypair | null = null; // Made public so SDK can detect as Keypair
 
   get publicKey(): PublicKey | null {
     return this.keypair?.publicKey ?? null;
@@ -17,6 +17,11 @@ export class LocalnetWalletAdapter implements WalletAdapter {
 
   get connected(): boolean {
     return this.keypair !== null;
+  }
+
+  // Expose secretKey so SDK can detect this as a Keypair and use the Keypair signing path
+  get secretKey(): Uint8Array | null {
+    return this.keypair?.secretKey ?? null;
   }
 
   async connect(): Promise<void> {

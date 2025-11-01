@@ -8,6 +8,7 @@ import { getInstrumentMetadata } from '../instruments/config';
 export interface Market {
   slab: PublicKey;
   instrument: PublicKey;
+  oracle?: PublicKey; // Oracle account for price feeds
   symbol: string;
   markPrice: number;
   takerFeeBps: number;
@@ -57,9 +58,9 @@ export function useMarkets() {
             const instruments = await client.getInstruments(slab);
             const instrument = instruments[0];
 
-            // Try to fetch live oracle price (localnet), fallback to slab mark price
-            const oraclePrice = await client.getOraclePrice(slabState.instrument);
-            const markPrice = oraclePrice ?? (slabState.markPx.toNumber() / 1_000_000);
+            // Try to fetch live oracle account (localnet), fallback to slab mark price
+            const oracleData = await client.getOracleAccount(slabState.instrument);
+            const markPrice = oracleData?.price ?? (slabState.markPx.toNumber() / 1_000_000);
 
             // Get instrument metadata (symbol, display name, etc.)
             const config = getConfig();
@@ -68,6 +69,7 @@ export function useMarkets() {
             return {
               slab,
               instrument: slabState.instrument,
+              oracle: oracleData?.pubkey, // Store oracle PublicKey for trading
               symbol: metadata.symbol,
               markPrice,
               takerFeeBps: slabState.takerFeeBps.toNumber() / 10_000, // Convert from 1e6 scale to bps

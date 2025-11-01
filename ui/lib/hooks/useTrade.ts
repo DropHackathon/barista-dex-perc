@@ -13,6 +13,7 @@ export interface TradeParams {
   quantity: BN;
   price?: BN;
   leverage?: number;
+  oracle?: PublicKey;
 }
 
 export interface TradeResult {
@@ -56,13 +57,15 @@ export function useTrade(): UseTrade {
             signature = await client.marketBuy(
               params.slab,
               params.quantity,
-              params.leverage
+              params.leverage,
+              params.oracle
             );
           } else {
             signature = await client.marketSell(
               params.slab,
               params.quantity,
-              params.leverage
+              params.leverage,
+              params.oracle
             );
           }
         } else {
@@ -76,14 +79,16 @@ export function useTrade(): UseTrade {
               params.slab,
               params.quantity,
               params.price,
-              params.leverage
+              params.leverage,
+              params.oracle
             );
           } else {
             signature = await client.limitSell(
               params.slab,
               params.quantity,
               params.price,
-              params.leverage
+              params.leverage,
+              params.oracle
             );
           }
         }

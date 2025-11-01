@@ -74,8 +74,107 @@ export function usePortfolio(): PortfolioData {
         return;
       }
 
-      // TODO: Implement position fetching
+      // Fetch positions from portfolio exposures
       const positionsData: any[] = [];
+
+      if (portfolio.exposures && portfolio.exposures.length > 0) {
+        // Get registry to map indices to actual slab/instrument pubkeys
+        const registry = await client.router?.getRegistry();
+
+        if (registry) {
+          for (const exposure of portfolio.exposures) {
+            // Skip zero positions
+            if (exposure.positionQty.isZero()) continue;
+
+            // Get slab from registry
+            const slabEntry = registry.slabs[exposure.slabIndex];
+            if (!slabEntry || !slabEntry.active) continue;
+
+            const slabId = slabEntry.slabId;
+
+            // Fetch slab state to get instruments
+            const slabState = await client.getSlabState(slabId);
+            if (!slabState) continue;
+
+            // Get instrument pubkey - for now assume single instrument at index 0
+            const instrument = slabState.instrument;
+
+            // Get config
+            const config = await import('../config').then(m => m.getConfig());
+
+            // Get mark price from oracle (localnet) or slab
+            let markPrice = slabState.markPx;
+            if (config.network === 'localnet' && slabEntry.oracleId) {
+              try {
+                const oracleAccountInfo = await client.connection.getAccountInfo(slabEntry.oracleId);
+                if (oracleAccountInfo && oracleAccountInfo.data.length >= 128) {
+                  const priceOffset = 80;
+                  markPrice = new BN(oracleAccountInfo.data.readBigInt64LE(priceOffset).toString());
+                }
+              } catch (err) {
+                // Fallback to slab mark price
+              }
+            }
+
+            // Fetch PositionDetails PDA for entry price and margin
+            let entryPrice = new BN(0);
+            let marginHeld = new BN(0);
+            try {
+              const portfolioAddress = await client.router?.derivePortfolioAddress(publicKey);
+              if (portfolioAddress && client.router) {
+                const [positionDetailsPda] = client.router.derivePositionDetailsPDA(
+                  portfolioAddress,
+                  exposure.slabIndex,
+                  exposure.instrumentIndex
+                );
+
+                const positionDetailsAccount = await client.connection.getAccountInfo(positionDetailsPda);
+                if (positionDetailsAccount && positionDetailsAccount.data.length >= 136) {
+                  const data = positionDetailsAccount.data;
+                  const entryPriceOffset = 48;
+                  const marginHeldOffset = 112;
+
+                  entryPrice = new BN(data.readBigInt64LE(entryPriceOffset).toString());
+                  marginHeld = new BN(data.readBigInt64LE(marginHeldOffset).toString());
+                }
+              }
+            } catch (err) {
+              // Position details not found - likely a new position
+            }
+
+            // Calculate unrealized PnL
+            let unrealizedPnl = new BN(0);
+            if (!markPrice.isZero() && !entryPrice.isZero()) {
+              const priceDiff = markPrice.sub(entryPrice);
+              unrealizedPnl = exposure.positionQty.mul(priceDiff).div(new BN(1_000_000));
+            }
+
+            // Calculate leverage
+            let leverage = 1;
+            if (marginHeld.gt(new BN(0)) && !exposure.positionQty.isZero()) {
+              const notionalLamports = exposure.positionQty.abs().mul(new BN(1_000));
+              const leverageBN = notionalLamports.mul(new BN(100)).div(marginHeld);
+              leverage = leverageBN.toNumber() / 100;
+            }
+
+            // Get instrument metadata
+            const metadata = await import('../instruments/config').then(m =>
+              m.getInstrumentMetadata(instrument, config.network)
+            );
+
+            positionsData.push({
+              slab: slabId,
+              instrument,
+              symbol: metadata.symbol,
+              quantity: exposure.positionQty,
+              avgEntryPrice: entryPrice,
+              markPrice,
+              unrealizedPnl,
+              leverage,
+            });
+          }
+        }
+      }
 
       // Calculate portfolio metrics
       const equity = portfolio.equity;
@@ -86,7 +185,7 @@ export function usePortfolio(): PortfolioData {
       const positionsWithMetrics: Position[] = [];
 
       for (const pos of positionsData) {
-        // Calculate position metrics
+        // Calculate positions metrics
         const pnl = pos.unrealizedPnl || new BN(0);
         totalUnrealizedPnl = totalUnrealizedPnl.add(pnl);
 

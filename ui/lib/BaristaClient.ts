@@ -53,8 +53,8 @@ export class BaristaClient {
     return this.slab.getInstruments(address);
   }
 
-  // Fetch oracle price for an instrument (localnet support)
-  async getOraclePrice(instrument: PublicKey): Promise<number | null> {
+  // Get oracle account for an instrument (returns both pubkey and price)
+  async getOracleAccount(instrument: PublicKey): Promise<{ pubkey: PublicKey; price: number } | null> {
     if (!this.oracleProgramId) {
       return null;
     }
@@ -72,7 +72,7 @@ export class BaristaClient {
           if (oracleInstrument.equals(instrument)) {
             const priceLow = account.data.readBigInt64LE(80);
             const price = Number(priceLow) / 1_000_000; // Convert from 1e6 scale
-            return price;
+            return { pubkey, price };
           }
         }
       }
@@ -81,6 +81,12 @@ export class BaristaClient {
     } catch (error) {
       return null;
     }
+  }
+
+  // Fetch oracle price for an instrument (localnet support)
+  async getOraclePrice(instrument: PublicKey): Promise<number | null> {
+    const oracle = await this.getOracleAccount(instrument);
+    return oracle?.price ?? null;
   }
 
   // Portfolio address derivation (no wallet required)

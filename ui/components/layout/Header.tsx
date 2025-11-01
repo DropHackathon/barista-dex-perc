@@ -103,7 +103,7 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-card/90 backdrop-blur-xl">
-      <div className="max-w-screen-2xl mx-auto flex h-10 items-center px-3">
+      <div className="flex h-10 items-center px-3">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <span className="font-bold text-sm tracking-tight text-white">Barista DEX</span>

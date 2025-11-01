@@ -13,11 +13,18 @@ import {
 import { fetchBinanceCandles, extractBinanceSymbol, mapIntervalToBinance } from '@/lib/chart/priceData';
 import { Button } from '@/components/ui/button';
 
+interface Position {
+  entryPrice: number;
+  quantity: number;
+}
+
 interface LightweightChartProps {
   symbol: string; // TradingView format: "BINANCE:SOLUSDT"
   interval?: '1' | '5' | '15' | '30' | '60' | '240' | 'D' | 'W';
   height?: number;
   updateIntervalSeconds?: number; // Real-time update interval (0 = disabled)
+  onPriceUpdate?: (price: number) => void; // Callback when price updates from Binance
+  positions?: Position[]; // Positions to mark on chart
 }
 
 type ChartType = 'candlestick' | 'line' | 'area';
@@ -27,6 +34,8 @@ export function LightweightChart({
   interval: initialInterval = '15',
   height = 500,
   updateIntervalSeconds = 10,
+  onPriceUpdate,
+  positions = [],
 }: LightweightChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -46,12 +55,14 @@ export function LightweightChart({
   const showVolumeRef = useRef(showVolume);
   const symbolRef = useRef(symbol);
   const updateIntervalIdRef = useRef<NodeJS.Timeout | null>(null);
+  const onPriceUpdateRef = useRef(onPriceUpdate);
 
   // Update refs when state changes
   useEffect(() => { intervalRef.current = interval; }, [interval]);
   useEffect(() => { chartTypeRef.current = chartType; }, [chartType]);
   useEffect(() => { showVolumeRef.current = showVolume; }, [showVolume]);
   useEffect(() => { symbolRef.current = symbol; }, [symbol]);
+  useEffect(() => { onPriceUpdateRef.current = onPriceUpdate; }, [onPriceUpdate]);
 
   // Create chart once on mount
   useEffect(() => {
@@ -75,6 +86,28 @@ export function LightweightChart({
       },
       rightPriceScale: {
         borderColor: '#2a2a2a',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.1,
+        },
+      },
+      handleScale: {
+        axisPressedMouseMove: {
+          time: true,
+          price: true,
+        },
+        mouseWheel: true,
+        pinch: true,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      kineticScroll: {
+        mouse: true,
+        touch: true,
       },
       crosshair: {
         mode: 1,
@@ -265,6 +298,26 @@ export function LightweightChart({
         // Fit content to view
         chart.timeScale().fitContent();
 
+        // Add price lines for positions
+        positions.forEach((position) => {
+          if (mainSeries && position.entryPrice) {
+            mainSeries.createPriceLine({
+              price: position.entryPrice,
+              color: position.quantity > 0 ? '#26a69a' : '#ef5350', // Green for long, red for short
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: position.quantity > 0 ? 'Long Entry' : 'Short Entry',
+            });
+          }
+        });
+
+        // Call onPriceUpdate with the latest close price
+        if (onPriceUpdateRef.current && candles.length > 0) {
+          const latestPrice = candles[candles.length - 1].close;
+          onPriceUpdateRef.current(latestPrice);
+        }
+
         setIsLoading(false);
         dataLoadedRef.current = true;
         loadingRef.current = false;
@@ -335,6 +388,11 @@ export function LightweightChart({
             value: latestCandle.volume || 0,
             color: latestCandle.close >= latestCandle.open ? '#26a69a80' : '#ef535080',
           });
+        }
+
+        // Call onPriceUpdate callback with the latest close price
+        if (onPriceUpdateRef.current) {
+          onPriceUpdateRef.current(latestCandle.close);
         }
       } catch (err) {
         // Silently fail
