@@ -24,7 +24,7 @@ export default function RootLayout({
       <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
         <WalletProvider>
           {children}
-          <Toaster theme="dark" position="bottom-right" />
+          <Toaster theme="dark" position="bottom-right" closeButton />
         </WalletProvider>
       </body>
     </html>
