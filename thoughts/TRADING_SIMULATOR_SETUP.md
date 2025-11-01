@@ -496,6 +496,7 @@ You can start trading now.
 ### Limitations
 - **No Liquidations**: Liquidation mechanism is not currently implemented
 - **Single Instrument**: Only one trading pair supported per slab
+- **No True Limit Orders**: Limit orders are currently atomic (instant) fills at whatever price user specifies
 - **Leverage Range**: Supports 1x-10x leverage only
 - **Localnet Only**: Currently configured for local development only
 

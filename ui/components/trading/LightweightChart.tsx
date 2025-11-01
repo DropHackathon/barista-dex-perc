@@ -343,6 +343,31 @@ export function LightweightChart({
     };
   }, [symbol, interval, chartType, showVolume, showMA]);
 
+  // Update entry price lines when positions change
+  useEffect(() => {
+    if (!chartRef.current || !seriesRef.current[0]) return;
+
+    const mainSeries = seriesRef.current[0];
+
+    // Remove all existing price lines
+    // Note: There's no direct API to remove price lines, so we'll need to track them
+    // For now, the lines will accumulate - we need to reload data to clear them
+
+    // Add new price lines for current positions
+    positions.forEach((position) => {
+      if (position.entryPrice) {
+        mainSeries.createPriceLine({
+          price: position.entryPrice,
+          color: position.quantity > 0 ? '#26a69a' : '#ef5350',
+          lineWidth: 2,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: position.quantity > 0 ? 'Long Entry' : 'Short Entry',
+        });
+      }
+    });
+  }, [positions]);
+
   // Real-time updates - polls Binance every N seconds to update the latest candle
   useEffect(() => {
     if (updateIntervalSeconds === 0) return;

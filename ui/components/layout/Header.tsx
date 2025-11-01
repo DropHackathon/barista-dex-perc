@@ -341,6 +341,10 @@ export function Header() {
                 </li>
                 <li className="flex gap-2">
                   <span className="text-yellow-400">•</span>
+                  <span><strong>No True Limit Orders:</strong> Limit orders are currently atomic (instant) fills at whatever price user specifies</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-yellow-400">•</span>
                   <span><strong>Leverage Range:</strong> Supports 1x-10x leverage only</span>
                 </li>
                 <li className="flex gap-2">
