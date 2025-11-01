@@ -177,15 +177,27 @@ impl PositionDetails {
     ) -> (i128, i64, u128) {
         let qty_closed = reduce_qty.abs().min(self.total_qty.abs());
 
-        // Calculate realized PnL: qty_closed * (exit_price - entry_price)
+        // Calculate realized PnL: qty_closed * (exit_price - entry_price) / 1_000_000
+        // For SOL-PERP: each contract is 1 SOL, so qty is in SOL and prices are $/SOL
+        // PnL in USD = qty_SOL * price_diff_USD/SOL
+        // But we need PnL in SOL, so: PnL_SOL = (qty * price_diff) / exit_price
         let price_diff = (exit_price as i128) - (self.avg_entry_price as i128);
-        let pnl = if self.total_qty > 0 {
+
+        // First calculate USD PnL
+        let pnl_usd_raw = if self.total_qty > 0 {
             // Closing long: profit when exit > entry
-            (qty_closed as i128) * price_diff / 1_000_000
+            (qty_closed as i128) * price_diff
         } else {
             // Closing short: profit when exit < entry
-            -(qty_closed as i128) * price_diff / 1_000_000
+            -(qty_closed as i128) * price_diff
         };
+
+        // Convert USD PnL to SOL PnL by dividing by exit price
+        // pnl_usd_raw = (micro-SOL * micro-USD/SOL) = micro^2-USD
+        // exit_price = micro-USD/SOL
+        // pnl_SOL = micro^2-USD / micro-USD/SOL = micro-SOL
+        // Then multiply by 1000 to convert from micro-SOL to lamports (1e6 -> 1e9)
+        let pnl = (pnl_usd_raw / (exit_price as i128)) * 1_000;
 
         self.realized_pnl = self.realized_pnl.saturating_add(pnl);
         self.total_fees = self.total_fees.saturating_add(fee);
