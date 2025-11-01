@@ -197,4 +197,33 @@ export class BaristaClient {
       return false;
     }
   }
+
+  // High-level trading methods
+  async marketBuy(slab: PublicKey, quantity: BN, leverage: number = 1, oracle?: PublicKey): Promise<string> {
+    if (!this.router) {
+      throw new Error('Market buy requires wallet connection');
+    }
+    return this.router.marketBuy(slab, quantity, leverage, oracle);
+  }
+
+  async marketSell(slab: PublicKey, quantity: BN, leverage: number = 1, oracle?: PublicKey): Promise<string> {
+    if (!this.router) {
+      throw new Error('Market sell requires wallet connection');
+    }
+    return this.router.marketSell(slab, quantity, leverage, oracle);
+  }
+
+  async limitBuy(slab: PublicKey, quantity: BN, limitPrice: BN, leverage: number = 1, oracle?: PublicKey): Promise<string> {
+    if (!this.router) {
+      throw new Error('Limit buy requires wallet connection');
+    }
+    return this.router.limitBuy(slab, quantity, limitPrice, leverage, oracle);
+  }
+
+  async limitSell(slab: PublicKey, quantity: BN, limitPrice: BN, leverage: number = 1, oracle?: PublicKey): Promise<string> {
+    if (!this.router) {
+      throw new Error('Limit sell requires wallet connection');
+    }
+    return this.router.limitSell(slab, quantity, limitPrice, leverage, oracle);
+  }
 }
