@@ -487,3 +487,25 @@ As you can see, your portfolio account is automatically created, but you need to
 You can start trading now.
 
 ![Trade](../ui/public/trade.png)
+
+## Current Limitations & Known Bugs
+
+### Critical Issues
+- None currently identified
+
+### Limitations
+- **No Liquidations**: Liquidation mechanism is not currently implemented
+- **Single Instrument**: Only one trading pair supported per slab
+- **Leverage Range**: Supports 1x-10x leverage only
+- **Localnet Only**: Currently configured for local development only
+
+### Minor Issues
+- **Mean Leverage Display**: Spot trades (1x) do not properly aggregate mean leverage when leveraged trades are added to the position
+- **UI Polling**: Portfolio data refreshes every 5 seconds (may show brief stale data)
+- **Price Updates**: Mark prices update on-chain only, not real-time from oracle
+
+### Recently Fixed
+- **1x Leverage**: Fixed insufficient margin error for 1x leverage trades
+- **Position Reversal**: Fixed margin calculation when flipping long/short
+- **PnL Calculation**: Corrected leverage multiplier in unrealized PnL
+- **UI Flickering**: Fixed position and PnL displays flickering during updates
