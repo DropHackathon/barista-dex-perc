@@ -1,5 +1,5 @@
 # Percolator
-
+by (@barista_perc) - x.com/barista_perc
 A formally-verified perpetual exchange protocol for Solana with O(1) crisis loss socialization.
 
 > **⚠️ EDUCATIONAL USE ONLY**
