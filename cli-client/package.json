@@ -1,6 +1,6 @@
 {
   "name": "@barista-dex/cli",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "description": "Command-line interface for Barista DEX",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
